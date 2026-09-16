@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Resultados de simulación: se regeneran, y un visor pesa varios MB
+resultados/
+*.html
+!unai/plantilla_visor.html
