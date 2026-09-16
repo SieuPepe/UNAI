@@ -41,10 +41,10 @@ class ConfigDron:
     """Tiempo de respuesta del lazo de velocidad (`docs/02`, §4)."""
 
     camara_fov_grados: float = 90.0
-    bateria_wh: float = 90.0
+    bateria_wh: float = 60.0
     area_rotores_m2: float = 0.18
-    area_frontal_m2: float = 0.06
-    coef_arrastre: float = 1.0
+    area_frontal_m2: float = 0.03
+    coef_arrastre: float = 0.6
     figura_merito: float = 0.7
     """Rendimiento real del rotor frente al ideal de la teoría del disco."""
 
@@ -242,7 +242,38 @@ class ConfigComportamiento:
     obst_radio_influencia_m: float = 20.0
     obst_k: float = 120.0
     obst_tangencial: float = 0.8
-    """Componente de rodeo que evita quedarse clavado ante una pared (`docs/02`, §6)."""
+    """Componente de rodeo de la barrera cercana (`docs/02`, §6)."""
+
+    obst_horizonte_s: float = 2.2
+    """Segundos de antelación con que se empieza a esquivar un obstáculo.
+
+    El campo potencial 1/d² por sí solo no sirve a 15 m/s: a 17 metros vale
+    0,009 m/s², o sea nada, y a un metro es enorme. El dron llegaría encima del
+    árbol antes de notarlo. El esquive se decide por **tiempo hasta el
+    impacto**, igual que la anticolisión entre drones, y el campo potencial
+    queda como barrera de última defensa."""
+
+    obst_ganancia_lateral: float = 14.0
+    obst_ganancia_frenado: float = 0.45
+
+    obst_margen_m: float = 1.0
+    """Holgura que se quiere conservar respecto a la superficie del obstáculo."""
+
+    obst_freno_fraccion: float = 0.6
+    """Parte de la aceleración máxima que se reserva para frenar.
+
+    El resto queda para esquivar y para cumplir la misión. Reservar el 100 %
+    daría un dron que solo sabe frenar."""
+
+    obst_ganancia_freno: float = 25.0
+    """Con cuánta contundencia se corrige ir más rápido de lo permitido.
+
+    Sin este término, el dron gasta su presupuesto de aceleración en apartarse
+    de lado y llega demasiado rápido demasiado cerca: a 1,9 m de una pared con
+    6,7 m/s hacia ella harían falta 11,9 m/s² para parar y solo hay 9,81. En
+    ese punto ya no hay maniobra posible, por buena que sea la lógica de
+    esquive. La regla es la del conductor: la velocidad de acercamiento nunca
+    debe superar la que permite la distancia de frenado que queda."""
 
     anti_horizonte_s: float = 4.0
     """Cuántos segundos hacia el futuro mira la anticolisión (`docs/02`, §7)."""
@@ -254,6 +285,18 @@ class ConfigComportamiento:
 
     sep_distancia_m: float = 2.5
     sep_k: float = 12.0
+
+    anti_margen_m: float = 0.8
+    anti_freno_fraccion: float = 0.6
+    anti_ganancia_freno: float = 25.0
+    """Límite de velocidad de acercamiento entre drones por distancia de frenado.
+
+    Mismo principio que `obst_ganancia_freno`, aplicado a los pares de drones.
+    Hace falta por la misma razón: cuando la formación se rompe para esquivar
+    un bosque, los drones se empujan unos contra otros, y la lógica predictiva
+    por punto de máxima aproximación decide *hacia dónde* apartarse pero no
+    impide llegar demasiado rápido demasiado cerca. Como ambos drones frenan a
+    la vez, la deceleración disponible es el doble."""
 
     cohesion_holgura: float = 1.0
     """Margen sobre `d_max` antes de que tire la fuerza de cohesión."""
@@ -279,9 +322,18 @@ class ConfigSimulacion:
     """Las trayectorias se guardan a 5 Hz y el visor interpola; las métricas
     se calculan a la frecuencia completa."""
 
-    celda_cobertura_m: float = 5.0
+    celda_cobertura_m: float = 2.5
     semilla: int = 42
     modo_estricto: bool = False
+    usar_gpu: bool = False
+    """La casilla de GPU. A 100 drones se espera que la GPU sea más LENTA que
+    la CPU: cada operación cuesta más en despacharse al chip que en resolverse
+    sobre matrices de 100 filas. Compensa a partir de varios miles de drones.
+    Si se marca y no hay GPU, se avisa de forma visible y se sigue en CPU."""
+
+    max_obstaculos_visor: int = 4000
+    """Un bosque tiene medio millón de troncos y el visor no puede dibujarlos
+    todos: se le manda una muestra, y el visor lo indica."""
     """Si es cierto, superar `d_max` cuenta como fallo y no solo como métrica."""
 
     def validar(self) -> None:

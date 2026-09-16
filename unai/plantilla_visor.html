@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UNAI — visor de enjambre</title>
+<style>
+  :root{
+    --fondo:#0d1117; --panel:#161b22; --borde:#30363d; --texto:#e6edf3;
+    --suave:#8b949e; --acento:#58a6ff; --alerta:#f85149; --ok:#3fb950;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--fondo);color:var(--texto);
+    font:13px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  #lienzo{display:block;width:100%;height:100%;cursor:grab}
+  #lienzo.arrastrando{cursor:grabbing}
+  .panel{position:absolute;background:rgba(22,27,34,.92);border:1px solid var(--borde);
+    border-radius:8px;padding:10px 12px;backdrop-filter:blur(6px)}
+  #info{top:12px;left:12px;min-width:210px;max-width:290px}
+  #info h1{margin:0 0 6px;font-size:14px;letter-spacing:.3px}
+  #info .sub{color:var(--suave);font-size:11px;margin-bottom:8px}
+  .fila{display:flex;justify-content:space-between;gap:10px;padding:1px 0}
+  .fila span:first-child{color:var(--suave)}
+  .fila span:last-child{font-variant-numeric:tabular-nums}
+  #capas{top:12px;right:12px;min-width:170px}
+  #capas label{display:flex;align-items:center;gap:7px;padding:2px 0;cursor:pointer;user-select:none}
+  #capas input{accent-color:var(--acento);cursor:pointer}
+  #mandos{left:50%;transform:translateX(-50%);bottom:12px;width:min(860px,calc(100% - 24px));
+    display:flex;flex-direction:column;gap:8px}
+  .linea{display:flex;align-items:center;gap:10px}
+  button{background:#21262d;color:var(--texto);border:1px solid var(--borde);border-radius:6px;
+    padding:5px 11px;cursor:pointer;font:inherit}
+  button:hover{background:#30363d;border-color:var(--acento)}
+  input[type=range]{flex:1;accent-color:var(--acento);cursor:pointer;min-width:60px}
+  .reloj{font-variant-numeric:tabular-nums;color:var(--suave);white-space:nowrap;font-size:12px}
+  #barraCob{height:4px;background:#21262d;border-radius:2px;overflow:hidden}
+  #barraCobRelleno{height:100%;background:var(--ok);width:0}
+  .aviso{color:var(--suave);font-size:11px;margin-top:6px;border-top:1px solid var(--borde);padding-top:6px}
+  .tecla{color:var(--suave);font-size:11px}
+  h2{margin:8px 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--suave)}
+</style>
+</head>
+<body>
+<canvas id="lienzo"></canvas>
+
+<div class="panel" id="info">
+  <h1 id="titulo">UNAI</h1>
+  <div class="sub" id="subtitulo"></div>
+  <div class="fila"><span>Tiempo</span><span id="vTiempo">—</span></div>
+  <div class="fila"><span>Cobertura</span><span id="vCobertura">—</span></div>
+  <div id="barraCob"><div id="barraCobRelleno"></div></div>
+  <div class="fila"><span>Separación mín.</span><span id="vSep">—</span></div>
+  <div class="fila"><span>Error formación</span><span id="vError">—</span></div>
+  <div class="fila"><span>Polarización</span><span id="vPol">—</span></div>
+  <div class="fila"><span>Energía</span><span id="vEnergia">—</span></div>
+  <div class="fila"><span>Dron seguido</span><span id="vDron">ninguno</span></div>
+  <div class="aviso" id="aviso"></div>
+</div>
+
+<div class="panel" id="capas">
+  <h2>Capas</h2>
+  <label><input type="checkbox" id="cCobertura" checked> Mapa de cobertura</label>
+  <label><input type="checkbox" id="cObstaculos" checked> Obstáculos</label>
+  <label><input type="checkbox" id="cEstelas"> Estelas</label>
+  <label><input type="checkbox" id="cSeguridad"> Radios de seguridad</label>
+  <label><input type="checkbox" id="cVelocidad"> Vectores de velocidad</label>
+  <label><input type="checkbox" id="cRejilla" checked> Rejilla del terreno</label>
+  <h2>Vista</h2>
+  <div class="linea"><button id="bCenital">Cenital</button><button id="bLateral">Lateral</button></div>
+  <div class="linea"><button id="bIso">Isométrica</button><button id="bSeguir">Seguir dron</button></div>
+  <div class="tecla" style="margin-top:6px">Arrastrar: girar · Rueda: zoom<br>Mayús+arrastrar: desplazar<br>Espacio: pausa · ←/→: paso a paso</div>
+</div>
+
+<div class="panel" id="mandos">
+  <div class="linea">
+    <button id="bReproducir">▶ Reproducir</button>
+    <span class="reloj" id="rMarco">0 / 0</span>
+    <input type="range" id="rTiempo" min="0" max="0" value="0" step="1">
+    <span class="reloj" id="rSegundos">0,0 s</span>
+  </div>
+  <div class="linea">
+    <span class="reloj">Velocidad</span>
+    <input type="range" id="rVelocidad" min="-2" max="2" value="0" step="0.25" style="max-width:190px">
+    <span class="reloj" id="rFactor">×1</span>
+    <span class="reloj" id="rFps" style="margin-left:auto"></span>
+  </div>
+</div>
+
+<script>
+"use strict";
+const D = /*__DATOS__*/;
+
+// --- utilidades -----------------------------------------------------------
+function desdeBase64(txt, Tipo){
+  const bin = atob(txt); const buf = new ArrayBuffer(bin.length); const v = new Uint8Array(buf);
+  for(let i=0;i<bin.length;i++) v[i]=bin.charCodeAt(i);
+  return new Tipo(buf);
+}
+const fmt = (x,d=1)=> x==null ? "—" : x.toLocaleString("es-ES",{minimumFractionDigits:d,maximumFractionDigits:d});
+
+// --- datos ----------------------------------------------------------------
+const NM = D.trayectorias.n_marcos, ND = D.trayectorias.n_drones;
+const crudo = desdeBase64(D.trayectorias.datos, Int16Array);
+const MIN = D.trayectorias.minimo, ESC = D.trayectorias.escala;
+const T = D.trayectorias.instantes;
+// Descuantización: de enteros de 16 bits a metros.
+const POS = new Float32Array(NM*ND*3);
+for(let i=0;i<crudo.length;i++){
+  const eje = i%3;
+  POS[i] = (crudo[i]+32768)/65535*ESC[eje] + MIN[eje];
+}
+const COB = D.cobertura.datos ? desdeBase64(D.cobertura.datos, Int32Array) : null;
+const CIL = D.obstaculos.cilindros, CAJ = D.obstaculos.cajas;
+
+// --- cámara ---------------------------------------------------------------
+const lienzo = document.getElementById("lienzo"), ctx = lienzo.getContext("2d");
+const centro = [D.escena.lado_x/2, D.escena.lado_y/2, 0];
+const cam = {objetivo:[...centro], azimut:-Math.PI/2, elevacion:0.62,
+             distancia:Math.max(D.escena.lado_x,D.escena.lado_y)*1.15, fov:Math.PI/3};
+let seguirDron = -1;
+
+function baseCamara(){
+  const ce=Math.cos(cam.elevacion), se=Math.sin(cam.elevacion);
+  const ojo=[cam.objetivo[0]+cam.distancia*ce*Math.cos(cam.azimut),
+             cam.objetivo[1]+cam.distancia*ce*Math.sin(cam.azimut),
+             cam.objetivo[2]+cam.distancia*se];
+  let f=[cam.objetivo[0]-ojo[0], cam.objetivo[1]-ojo[1], cam.objetivo[2]-ojo[2]];
+  const nf=Math.hypot(f[0],f[1],f[2]); f=f.map(v=>v/nf);
+  let d=[f[1]*1-f[2]*0, f[2]*0-f[0]*1, f[0]*0-f[1]*0];   // f x (0,0,1)
+  d=[f[1], -f[0], 0]; const nd=Math.hypot(d[0],d[1])||1; d=[d[0]/nd,d[1]/nd,0];
+  const a=[d[1]*f[2]-d[2]*f[1], d[2]*f[0]-d[0]*f[2], d[0]*f[1]-d[1]*f[0]];
+  return {ojo, f, d, a};
+}
+let B=baseCamara(), fEsc=1, anchoPx=0, altoPx=0;
+
+function proyectar(x,y,z){
+  const vx=x-B.ojo[0], vy=y-B.ojo[1], vz=z-B.ojo[2];
+  const pz = vx*B.f[0]+vy*B.f[1]+vz*B.f[2];
+  if(pz<=1) return null;
+  const px = vx*B.d[0]+vy*B.d[1]+vz*B.d[2];
+  const py = vx*B.a[0]+vy*B.a[1]+vz*B.a[2];
+  return [anchoPx/2 + fEsc*px/pz, altoPx/2 - fEsc*py/pz, pz];
+}
+
+function redimensionar(){
+  const r=Math.min(devicePixelRatio||1,2);
+  anchoPx=Math.floor(innerWidth*r); altoPx=Math.floor(innerHeight*r);
+  lienzo.width=anchoPx; lienzo.height=altoPx;
+  lienzo.style.width=innerWidth+"px"; lienzo.style.height=innerHeight+"px";
+  fEsc=(altoPx/2)/Math.tan(cam.fov/2);
+}
+addEventListener("resize",redimensionar); redimensionar();
+
+// --- interacción ----------------------------------------------------------
+let arrastrando=false, ultimo=null, desplazando=false;
+lienzo.addEventListener("pointerdown",e=>{arrastrando=true;desplazando=e.shiftKey;ultimo=[e.clientX,e.clientY];
+  lienzo.classList.add("arrastrando");lienzo.setPointerCapture(e.pointerId);});
+lienzo.addEventListener("pointerup",e=>{arrastrando=false;lienzo.classList.remove("arrastrando");});
+lienzo.addEventListener("pointermove",e=>{
+  if(!arrastrando)return;
+  const dx=e.clientX-ultimo[0], dy=e.clientY-ultimo[1]; ultimo=[e.clientX,e.clientY];
+  if(desplazando){
+    const k=cam.distancia/altoPx*2;
+    cam.objetivo[0]-=(B.d[0]*dx - B.a[0]*dy)*k;
+    cam.objetivo[1]-=(B.d[1]*dx - B.a[1]*dy)*k;
+    cam.objetivo[2]-=(B.d[2]*dx - B.a[2]*dy)*k;
+    seguirDron=-1;
+  }else{
+    cam.azimut-=dx*0.006;
+    cam.elevacion=Math.max(0.03,Math.min(1.54,cam.elevacion+dy*0.006));
+  }
+  B=baseCamara();
+});
+lienzo.addEventListener("wheel",e=>{e.preventDefault();
+  cam.distancia=Math.max(12,Math.min(D.escena.lado_x*4,cam.distancia*Math.exp(e.deltaY*0.0012)));
+  B=baseCamara();},{passive:false});
+lienzo.addEventListener("dblclick",e=>{   // seleccionar el dron más próximo al cursor
+  const r=Math.min(devicePixelRatio||1,2), mx=e.clientX*r, my=e.clientY*r;
+  let mejor=-1, mejorD=40*r;
+  for(let i=0;i<ND;i++){
+    const p=posicionDron(marcoActual,i), s=proyectar(p[0],p[1],p[2]);
+    if(!s)continue; const d=Math.hypot(s[0]-mx,s[1]-my);
+    if(d<mejorD){mejorD=d;mejor=i;}
+  }
+  seguirDron=mejor;
+});
+
+// --- reproducción ---------------------------------------------------------
+let marcoActual=0, reproduciendo=false, factor=1, ultimoT=performance.now(), fps=0;
+const rTiempo=document.getElementById("rTiempo");
+rTiempo.max=NM-1;
+function fijarMarco(m){marcoActual=Math.max(0,Math.min(NM-1,m));rTiempo.value=marcoActual;}
+rTiempo.addEventListener("input",()=>{marcoActual=+rTiempo.value;});
+document.getElementById("bReproducir").addEventListener("click",alternar);
+function alternar(){reproduciendo=!reproduciendo;
+  document.getElementById("bReproducir").textContent=reproduciendo?"⏸ Pausa":"▶ Reproducir";}
+const rVel=document.getElementById("rVelocidad");
+rVel.addEventListener("input",()=>{factor=Math.pow(2,+rVel.value);
+  document.getElementById("rFactor").textContent="×"+(factor<1?factor.toFixed(2):factor);});
+addEventListener("keydown",e=>{
+  if(e.code==="Space"){e.preventDefault();alternar();}
+  if(e.code==="ArrowRight")fijarMarco(marcoActual+1);
+  if(e.code==="ArrowLeft")fijarMarco(marcoActual-1);
+});
+document.getElementById("bCenital").onclick=()=>{cam.elevacion=1.53;B=baseCamara();};
+document.getElementById("bLateral").onclick=()=>{cam.elevacion=0.06;B=baseCamara();};
+document.getElementById("bIso").onclick=()=>{cam.elevacion=0.62;cam.azimut=-Math.PI/2;
+  cam.distancia=Math.max(D.escena.lado_x,D.escena.lado_y)*1.15;cam.objetivo=[...centro];seguirDron=-1;B=baseCamara();};
+document.getElementById("bSeguir").onclick=()=>{seguirDron=seguirDron<0?0:-1;};
+
+function posicionDron(marco,i){
+  const b=(marco*ND+i)*3;
+  return [POS[b],POS[b+1],POS[b+2]];
+}
+function posicionInterpolada(marco,frac,i){
+  const p=posicionDron(marco,i);
+  if(frac<=0||marco>=NM-1)return p;
+  const q=posicionDron(marco+1,i);
+  return [p[0]+(q[0]-p[0])*frac, p[1]+(q[1]-p[1])*frac, p[2]+(q[2]-p[2])*frac];
+}
+
+// --- dibujo ---------------------------------------------------------------
+const CUBOS_COB = 7;
+function dibujarCobertura(marco){
+  if(!COB) return;
+  const nx=D.cobertura.n_x, ny=D.cobertura.n_y, cx=D.cobertura.celda_x, cy=D.cobertura.celda_y;
+  const pasoActual = T[marco]/D.escena.dt_paso;
+  // Se agrupan las celdas en unos pocos tramos de color y se rellena cada
+  // tramo de una sola vez: dibujar diez mil cuadrados por separado no daría
+  // fluidez.
+  const rutas=[]; for(let k=0;k<CUBOS_COB;k++) rutas.push(new Path2D());
+  const maxPaso=D.cobertura.paso_max||1;
+  for(let j=0;j<ny;j++){
+    for(let i=0;i<nx;i++){
+      const v=COB[j*nx+i];
+      if(v<0||v>pasoActual) continue;
+      const x0=i*cx, y0=j*cy;
+      const a=proyectar(x0,y0,0), b=proyectar(x0+cx,y0,0), c=proyectar(x0+cx,y0+cy,0), d=proyectar(x0,y0+cy,0);
+      if(!a||!b||!c||!d) continue;
+      const k=Math.min(CUBOS_COB-1,Math.floor(v/maxPaso*CUBOS_COB));
+      const r=rutas[k];
+      r.moveTo(a[0],a[1]);r.lineTo(b[0],b[1]);r.lineTo(c[0],c[1]);r.lineTo(d[0],d[1]);r.closePath();
+    }
+  }
+  for(let k=0;k<CUBOS_COB;k++){
+    const t=k/(CUBOS_COB-1);
+    ctx.fillStyle=`rgba(${Math.round(40+150*t)},${Math.round(130+70*t)},${Math.round(90-40*t)},0.55)`;
+    ctx.fill(rutas[k]);
+  }
+}
+
+function dibujarRejilla(){
+  const n=20, lx=D.escena.lado_x, ly=D.escena.lado_y;
+  ctx.strokeStyle="rgba(120,140,170,.16)"; ctx.lineWidth=1; ctx.beginPath();
+  for(let i=0;i<=n;i++){
+    const x=lx*i/n, y=ly*i/n;
+    let a=proyectar(x,0,0), b=proyectar(x,ly,0);
+    if(a&&b){ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);}
+    a=proyectar(0,y,0); b=proyectar(lx,y,0);
+    if(a&&b){ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);}
+  }
+  ctx.stroke();
+}
+
+function dibujarObstaculos(){
+  const piezas=[];
+  for(const c of CIL){
+    const s=proyectar(c[0],c[1],(c[3]+c[4])/2); if(!s)continue;
+    piezas.push({z:s[2],tipo:0,d:c});
+  }
+  for(const b of CAJ){
+    const s=proyectar((b[0]+b[3])/2,(b[1]+b[4])/2,(b[2]+b[5])/2); if(!s)continue;
+    piezas.push({z:s[2],tipo:1,d:b});
+  }
+  piezas.sort((p,q)=>q.z-p.z);            // pintor: de lejos a cerca
+  for(const p of piezas){
+    if(p.tipo===0){
+      const c=p.d, base=proyectar(c[0],c[1],c[3]), alto=proyectar(c[0],c[1],c[4]);
+      if(!base||!alto)continue;
+      ctx.strokeStyle="rgba(120,170,120,.75)";
+      ctx.lineWidth=Math.max(1,fEsc*c[2]*2/base[2]);
+      ctx.beginPath();ctx.moveTo(base[0],base[1]);ctx.lineTo(alto[0],alto[1]);ctx.stroke();
+    }else{
+      const b=p.d;
+      const v=[[b[0],b[1]],[b[3],b[1]],[b[3],b[4]],[b[0],b[4]]];
+      const techo=v.map(q=>proyectar(q[0],q[1],b[5]));
+      const suelo=v.map(q=>proyectar(q[0],q[1],b[2]));
+      if(techo.some(q=>!q)||suelo.some(q=>!q))continue;
+      ctx.fillStyle="rgba(90,105,130,.45)";ctx.strokeStyle="rgba(150,170,200,.5)";ctx.lineWidth=1;
+      for(let i=0;i<4;i++){
+        const j=(i+1)%4;
+        ctx.beginPath();ctx.moveTo(suelo[i][0],suelo[i][1]);ctx.lineTo(suelo[j][0],suelo[j][1]);
+        ctx.lineTo(techo[j][0],techo[j][1]);ctx.lineTo(techo[i][0],techo[i][1]);ctx.closePath();
+        ctx.fill();ctx.stroke();
+      }
+      ctx.fillStyle="rgba(130,150,180,.6)";
+      ctx.beginPath();ctx.moveTo(techo[0][0],techo[0][1]);
+      for(let i=1;i<4;i++)ctx.lineTo(techo[i][0],techo[i][1]);
+      ctx.closePath();ctx.fill();ctx.stroke();
+    }
+  }
+}
+
+function dibujarDrones(marco,frac){
+  const conSeg=document.getElementById("cSeguridad").checked;
+  const conVel=document.getElementById("cVelocidad").checked;
+  const items=[];
+  for(let i=0;i<ND;i++){
+    const p=posicionInterpolada(marco,frac,i);
+    const s=proyectar(p[0],p[1],p[2]); if(!s)continue;
+    items.push({s,i,p});
+  }
+  items.sort((a,b)=>b.s[2]-a.s[2]);
+  for(const it of items){
+    const [x,y,z]=it.s, r=Math.max(1.6,fEsc*D.escena.radio_dron*6/z);
+    if(conSeg){
+      const rs=fEsc*D.escena.d_seguridad/z;
+      ctx.strokeStyle="rgba(248,81,73,.22)";ctx.lineWidth=1;
+      ctx.beginPath();ctx.ellipse(x,y,rs,rs*Math.sin(cam.elevacion),0,0,6.2832);ctx.stroke();
+    }
+    if(conVel&&marco<NM-1){
+      const q=posicionDron(marco+1,it.i), dt=(T[marco+1]-T[marco])||1;
+      const f=proyectar(it.p[0]+(q[0]-it.p[0])/dt*2, it.p[1]+(q[1]-it.p[1])/dt*2, it.p[2]+(q[2]-it.p[2])/dt*2);
+      if(f){ctx.strokeStyle="rgba(88,166,255,.6)";ctx.lineWidth=1;
+        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(f[0],f[1]);ctx.stroke();}
+    }
+    ctx.fillStyle = it.i===seguirDron ? "#f0b429" : "#58a6ff";
+    ctx.beginPath();ctx.arc(x,y,r,0,6.2832);ctx.fill();
+  }
+}
+
+function dibujarEstelas(marco){
+  const largo=Math.min(marco,40);
+  ctx.strokeStyle="rgba(88,166,255,.28)";ctx.lineWidth=1;ctx.beginPath();
+  for(let i=0;i<ND;i+=Math.max(1,Math.floor(ND/60))){
+    let primero=true;
+    for(let m=marco-largo;m<=marco;m++){
+      if(m<0)continue;
+      const p=posicionDron(m,i), s=proyectar(p[0],p[1],p[2]); if(!s)continue;
+      if(primero){ctx.moveTo(s[0],s[1]);primero=false;}else ctx.lineTo(s[0],s[1]);
+    }
+  }
+  ctx.stroke();
+}
+
+// --- panel ----------------------------------------------------------------
+function indiceSerie(t){
+  const s=D.serie.t; let k=0;
+  while(k<s.length-1 && s[k+1]<=t) k++;
+  return k;
+}
+function actualizarPanel(marco){
+  const t=T[marco], k=indiceSerie(t);
+  document.getElementById("vTiempo").textContent=fmt(t,1)+" s";
+  const cob=D.serie.cobertura[k]||0;
+  document.getElementById("vCobertura").textContent=fmt(cob,1)+" %";
+  document.getElementById("barraCobRelleno").style.width=cob+"%";
+  document.getElementById("vSep").textContent=fmt(D.serie.separacion_minima[k],2)+" m";
+  document.getElementById("vError").textContent=fmt(D.serie.error_formacion[k],2)+" m";
+  document.getElementById("vPol").textContent=fmt(D.serie.polarizacion[k],3);
+  document.getElementById("vEnergia").textContent=fmt(D.serie.energia_wh[k],1)+" Wh";
+  document.getElementById("vDron").textContent=seguirDron<0?"ninguno":("nº "+seguirDron);
+  document.getElementById("rMarco").textContent=(marco+1)+" / "+NM;
+  document.getElementById("rSegundos").textContent=fmt(t,1)+" s";
+}
+
+// --- bucle ----------------------------------------------------------------
+let acumulado=0;
+function cuadro(ahora){
+  const dtReal=Math.min((ahora-ultimoT)/1000,0.1); ultimoT=ahora;
+  fps=fps*0.9+(1/Math.max(dtReal,1e-4))*0.1;
+  if(reproduciendo){
+    acumulado+=dtReal*factor/Math.max(D.escena.dt_marco,1e-6);
+    while(acumulado>=1){acumulado-=1;marcoActual++;}
+    if(marcoActual>=NM){marcoActual=0;}
+    rTiempo.value=marcoActual;
+  }
+  if(seguirDron>=0){
+    const p=posicionDron(marcoActual,seguirDron);
+    cam.objetivo=[p[0],p[1],p[2]];B=baseCamara();
+  }
+  ctx.fillStyle="#0d1117";ctx.fillRect(0,0,anchoPx,altoPx);
+  if(document.getElementById("cRejilla").checked) dibujarRejilla();
+  if(document.getElementById("cCobertura").checked) dibujarCobertura(marcoActual);
+  if(document.getElementById("cObstaculos").checked) dibujarObstaculos();
+  if(document.getElementById("cEstelas").checked) dibujarEstelas(marcoActual);
+  dibujarDrones(marcoActual, reproduciendo?acumulado:0);
+  actualizarPanel(marcoActual);
+  document.getElementById("rFps").textContent=Math.round(fps)+" fps";
+  requestAnimationFrame(cuadro);
+}
+
+document.getElementById("titulo").textContent=D.escena.titulo;
+document.getElementById("subtitulo").textContent=D.escena.subtitulo;
+document.getElementById("aviso").innerHTML=D.escena.aviso;
+document.getElementById("rFactor").textContent="×1";
+requestAnimationFrame(cuadro);
+</script>
+</body>
+</html>

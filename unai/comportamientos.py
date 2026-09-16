@@ -36,6 +36,16 @@ class VecindadDrones:
     distancia_minima: object
 
 
+def _norma(xp, v):
+    """Norma por la última dimensión.
+
+    `linalg.norm` es genérica y valida ejes y órdenes en cada llamada; sobre
+    matrices de pares (N, N, 3) llamadas cincuenta veces por segundo simulado,
+    ese sobrecoste se nota.
+    """
+    return xp.sqrt((v * v).sum(axis=-1))
+
+
 class Comportamientos:
     """Calcula la aceleración total que pide cada dron en un instante."""
 
@@ -52,7 +62,7 @@ class Comportamientos:
         xp = self.xp
         n = posiciones.shape[0]
         diferencia = posiciones[None, :, :] - posiciones[:, None, :]
-        distancia = xp.linalg.norm(diferencia, axis=-1)
+        distancia = _norma(xp, diferencia)
 
         propio = xp.eye(n, dtype=bool)
         visible = (distancia <= self.enjambre.r_com_m) & ~propio
@@ -70,7 +80,9 @@ class Comportamientos:
 
     # -- comportamientos ---------------------------------------------------- #
 
-    def hacia_puesto(self, posiciones, velocidad_suelo, puestos, v_max: float):
+    def hacia_puesto(
+        self, posiciones, velocidad_suelo, puestos, v_max: float, velocidad_puesto=None
+    ):
         """Dirigirse al puesto asignado en la formación.
 
         Es el comportamiento que cumple los dos papeles a la vez: como el
@@ -82,54 +94,91 @@ class Comportamientos:
         compense por sí mismo la deriva del viento, como hace un aparato
         guiado por GPS: el viento le cuesta velocidad y batería, pero no se
         lleva la formación por delante.
+
+        `velocidad_puesto` es el término anticipativo: la velocidad a la que se
+        mueve el propio puesto. Sin él, el dron solo aceleraría cuando ya va
+        retrasado y el retraso se volvería permanente.
         """
         xp = self.xp
         error = puestos - posiciones
-        deseada = self._saturar(error * self.cfg.puesto_ganancia, v_max)
+        deseada = error * self.cfg.puesto_ganancia
+        if velocidad_puesto is not None:
+            deseada = deseada + xp.asarray(velocidad_puesto)[None, :]
+        deseada = self._saturar(deseada, v_max)
         return (deseada - velocidad_suelo) / self.enjambre.dron.tau_respuesta_s
 
     def evitar_obstaculos(self, velocidad_suelo, vecindad: Vecindad):
-        """Campo potencial repulsivo más una componente de rodeo.
+        """Esquive predictivo de obstáculos, con campo potencial de reserva.
 
-        La repulsión lleva el término 1/d² clásico: a 10 metros el obstáculo
-        casi no se nota y a 1 metro empuja cien veces más fuerte, que es lo que
-        garantiza que el dron no llegue a tocar (`docs/02`, §6).
+        Dos mecanismos superpuestos:
 
-        La componente tangencial es la que evita el fallo célebre de los campos
-        potenciales: sin ella, un dron que va de frente contra una pared con su
-        destino detrás se queda clavado, porque el empujón y la atracción se
-        cancelan. Empujando además de lado, el dron **rodea** el obstáculo.
+        1. **Esquive por tiempo hasta el impacto.** Se mide a qué velocidad se
+           acerca el dron a la superficie del obstáculo y cuánto tardaría en
+           alcanzarla; si falta menos que el horizonte, se aplica una
+           aceleración lateral que crece con la urgencia. Es lo que hace que el
+           dron empiece a rodear el árbol treinta metros antes y no encima.
+
+        2. **Barrera de campo potencial.** El clásico término 1/d², que a diez
+           metros casi no se nota y a un metro empuja cien veces más fuerte
+           (`docs/02`, §6). Es la última defensa, no el mecanismo principal:
+           por sí solo es demasiado débil de lejos y demasiado brusco de cerca
+           para un dron que va a 15 m/s.
+
+        El lado por el que se rodea es aquel hacia el que el dron ya se inclina.
+        En una aproximación perfectamente frontal ese lado no existe —la
+        proyección vale cero— y es justo el caso que deja al dron clavado
+        contra el obstáculo o lo hace atravesarlo. El empate se rompe con un
+        lado fijo, la misma regla que usan los barcos al cruzarse de frente.
         """
         xp = self.xp
         if not vecindad.hay_candidatos:
             return xp.zeros_like(velocidad_suelo)
 
         d0 = self.cfg.obst_radio_influencia_m
-        d = xp.maximum(vecindad.distancia, 0.05)
-        dentro_de_influencia = vecindad.distancia < d0
-
-        magnitud = self.cfg.obst_k * (1.0 / d - 1.0 / d0) / (d * d)
-        magnitud = xp.where(dentro_de_influencia, magnitud, 0.0)
-        # Un dron que ya ha penetrado recibe el empujón máximo, sin que la
-        # división por una distancia casi nula desborde a infinito.
-        techo = 50.0 * self.enjambre.dron.a_max_ms2
-        magnitud = xp.minimum(magnitud, techo)
-        magnitud = xp.where(vecindad.dentro, techo, magnitud)
-
-        radial = (magnitud[..., None] * vecindad.direccion).sum(axis=1)
-
-        # Tangente horizontal, girada 90° respecto a la dirección de empuje.
         u = vecindad.direccion
-        tangente = xp.stack([-u[..., 1], u[..., 0], xp.zeros_like(u[..., 0])], axis=-1)
-        norma = xp.linalg.norm(tangente, axis=-1, keepdims=True)
-        tangente = tangente / xp.maximum(norma, 1e-9)
-        # Se rodea por el lado hacia el que el dron ya se inclina.
-        sentido = xp.sign((tangente * velocidad_suelo[:, None, :]).sum(axis=-1))
-        tangencial = (
-            self.cfg.obst_tangencial * magnitud * sentido
-        )[..., None] * tangente
+        d = xp.maximum(vecindad.distancia, 0.05)
+        en_influencia = vecindad.distancia < d0
 
-        return radial + tangencial.sum(axis=1)
+        # Tangente horizontal y lado de rodeo.
+        tangente = xp.stack([-u[..., 1], u[..., 0], xp.zeros_like(u[..., 0])], axis=-1)
+        tangente = tangente / xp.maximum(_norma(xp, tangente), 1e-9)[..., None]
+        proyeccion = (tangente * velocidad_suelo[:, None, :]).sum(axis=-1)
+        sentido = xp.where(xp.abs(proyeccion) > 0.1, xp.sign(proyeccion), 1.0)
+
+        # 1) Esquive predictivo.
+        cierre = -(u * velocidad_suelo[:, None, :]).sum(axis=-1)
+        horizonte = self.cfg.obst_horizonte_s
+        t_impacto = d / xp.maximum(cierre, 0.1)
+        inminente = en_influencia & (cierre > 0.1) & (t_impacto < horizonte)
+        urgencia = xp.where(inminente, 1.0 - t_impacto / horizonte, 0.0)
+
+        lateral = (self.cfg.obst_ganancia_lateral * urgencia * sentido)[..., None] * tangente
+        frenado = (
+            self.cfg.obst_ganancia_lateral * self.cfg.obst_ganancia_frenado * urgencia
+        )[..., None] * u
+
+        # Límite de velocidad de acercamiento por distancia de frenado. Es la
+        # condición que hace la evitación físicamente realizable: sin ella el
+        # dron gasta su aceleración en apartarse de lado, llega a metro y medio
+        # de la pared con siete metros por segundo hacia ella, y en ese punto
+        # ninguna lógica de esquive puede ya salvarlo porque no existe la
+        # aceleración necesaria.
+        a_freno = self.cfg.obst_freno_fraccion * self.enjambre.dron.a_max_ms2
+        margen = xp.maximum(d - self.cfg.obst_margen_m - self.enjambre.dron.radio_m, 0.0)
+        permitida = xp.sqrt(2.0 * a_freno * margen)
+        exceso = xp.where(en_influencia, xp.maximum(cierre - permitida, 0.0), 0.0)
+        freno_duro = (self.cfg.obst_ganancia_freno * exceso)[..., None] * u
+
+        # 2) Barrera de campo potencial.
+        magnitud = self.cfg.obst_k * (1.0 / d - 1.0 / d0) / (d * d)
+        techo = 50.0 * self.enjambre.dron.a_max_ms2
+        magnitud = xp.where(en_influencia, xp.minimum(magnitud, techo), 0.0)
+        magnitud = xp.where(vecindad.dentro, techo, magnitud)
+        barrera = magnitud[..., None] * (
+            u + (self.cfg.obst_tangencial * sentido)[..., None] * tangente
+        )
+
+        return (lateral + frenado + freno_duro + barrera).sum(axis=1)
 
     def anticolision(self, posiciones, velocidad_suelo, vecindad: VecindadDrones):
         """Anticolisión predictiva por punto de máxima aproximación.
@@ -153,38 +202,51 @@ class Comportamientos:
         w2 = (w * w).sum(axis=-1)
         rw = (r * w).sum(axis=-1)
         horizonte = self.cfg.anti_horizonte_s
-        # Con velocidad relativa nula no hay aproximación: t_cpa se manda al
-        # infinito para que la condición de peligro lo descarte.
-        t_cpa = xp.where(w2 > 1e-9, -rw / xp.maximum(w2, 1e-9), horizonte * 10.0)
-        t_cpa = xp.clip(t_cpa, 0.0, horizonte)
+        # Con velocidad relativa nula no hay aproximación, y con rw >= 0 los
+        # drones ya se están separando: en ambos casos t_cpa queda en cero y
+        # la condición de peligro los descarta.
+        t_cpa = xp.minimum(xp.maximum(-rw / xp.maximum(w2, 1e-9), 0.0), horizonte)
 
         cierre = r + w * t_cpa[..., None]
-        d_cpa = xp.linalg.norm(cierre, axis=-1)
+        d_cpa2 = (cierre * cierre).sum(axis=-1)
 
         d_seg = self.cfg.anti_distancia_seguridad_m
-        peligro = vecindad.visible & (d_cpa < d_seg) & (rw < 0.0)
+        peligro = vecindad.visible & (d_cpa2 < d_seg * d_seg) & (rw < 0.0)
 
         # Escapar en sentido contrario a donde estará el vecino en el momento
-        # de máxima cercanía.
-        norma = xp.linalg.norm(cierre, axis=-1, keepdims=True)
-        escape = -cierre / xp.maximum(norma, 1e-9)
-        # Aproximación exactamente frontal: el vector de escape es nulo y hay
-        # que elegir un lado. La perpendicular a la velocidad relativa da
-        # lados opuestos a los dos drones automáticamente.
+        # de máxima cercanía. En una aproximación exactamente frontal ese
+        # vector es nulo y hay que elegir un lado: la perpendicular a la
+        # velocidad relativa da lados opuestos a los dos drones de forma
+        # automática, porque cada uno ve la velocidad relativa del otro con el
+        # signo cambiado. La reciprocidad sale sola, sin acordarla.
         perpendicular = xp.stack([-w[..., 1], w[..., 0], xp.zeros_like(w[..., 0])], axis=-1)
-        perpendicular = perpendicular / xp.maximum(
-            xp.linalg.norm(perpendicular, axis=-1, keepdims=True), 1e-9
-        )
-        escape = xp.where(norma > 1e-6, escape, perpendicular)
+        bruto = xp.where(d_cpa2[..., None] > 1e-12, -cierre, perpendicular)
+        escape = bruto / xp.maximum(_norma(xp, bruto), 1e-9)[..., None]
 
-        urgencia_distancia = xp.clip((d_seg - d_cpa) / d_seg, 0.0, 1.0)
-        urgencia_tiempo = xp.clip((horizonte - t_cpa) / horizonte, 0.0, 1.0)
-        intensidad = self.cfg.anti_ganancia * urgencia_distancia * urgencia_tiempo
-        intensidad = xp.where(peligro, intensidad, 0.0)
+        d_cpa = xp.sqrt(d_cpa2)
+        urgencia = ((d_seg - d_cpa) / d_seg) * ((horizonte - t_cpa) / horizonte)
+        intensidad = xp.where(peligro, self.cfg.anti_ganancia * urgencia, 0.0)
         if self.cfg.anti_reciproco:
             intensidad = intensidad * 0.5
 
-        return (intensidad[..., None] * escape).sum(axis=1)
+        # Límite de velocidad de acercamiento por distancia de frenado, igual
+        # que frente a los obstáculos. La lógica anterior decide hacia dónde
+        # apartarse; esta impide llegar a una distancia desde la que apartarse
+        # ya no sea físicamente posible.
+        d = xp.maximum(vecindad.distancia, 1e-6)
+        hacia = r / d[..., None]
+        cierre_radial = -rw / d
+        holgura = xp.maximum(
+            d - 2.0 * self.enjambre.dron.radio_m - self.cfg.anti_margen_m, 0.0
+        )
+        # Frenan los dos a la vez, así que la deceleración efectiva es doble.
+        a_freno = 2.0 * self.cfg.anti_freno_fraccion * self.enjambre.dron.a_max_ms2
+        exceso = xp.where(
+            vecindad.visible, xp.maximum(cierre_radial - xp.sqrt(2.0 * a_freno * holgura), 0.0), 0.0
+        )
+        freno = (self.cfg.anti_ganancia_freno * exceso)[..., None] * (-hacia)
+
+        return ((intensidad[..., None] * escape) + freno).sum(axis=1)
 
     def separacion(self, vecindad: VecindadDrones):
         """Repulsión de cortesía a corta distancia: la red de seguridad.
@@ -201,7 +263,7 @@ class Comportamientos:
         magnitud = self.cfg.sep_k * (1.0 / d - 1.0 / d_sep) / (d * d)
         magnitud = xp.where(cerca, xp.minimum(magnitud, 50.0 * self.enjambre.dron.a_max_ms2), 0.0)
 
-        alejarse = -vecindad.diferencia / xp.maximum(d, 1e-9)[..., None]
+        alejarse = -vecindad.diferencia / d[..., None]
         return (magnitud[..., None] * alejarse).sum(axis=1)
 
     def cohesion(self, posiciones, vecindad: VecindadDrones):
@@ -220,8 +282,7 @@ class Comportamientos:
         total = peso.sum(axis=1, keepdims=True)
         centro = (peso[..., None] * vecindad.diferencia).sum(axis=1) / xp.maximum(total, 1.0)
 
-        norma = xp.linalg.norm(centro, axis=-1, keepdims=True)
-        direccion = centro / xp.maximum(norma, 1e-9)
+        direccion = centro / xp.maximum(_norma(xp, centro), 1e-9)[..., None]
         exceso = xp.clip(vecindad.distancia_minima - umbral, 0.0, 50.0)
         # Sin ningún vecino a la vista no hay enjambre al que volver: de eso se
         # encarga el puesto asignado.
@@ -242,5 +303,5 @@ class Comportamientos:
 
     def _saturar(self, vector, maximo: float):
         xp = self.xp
-        norma = xp.linalg.norm(vector, axis=-1, keepdims=True)
+        norma = _norma(xp, vector)[..., None]
         return vector * xp.minimum(1.0, maximo / xp.maximum(norma, 1e-12))
