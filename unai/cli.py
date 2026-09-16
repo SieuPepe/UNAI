@@ -19,7 +19,7 @@ import webbrowser
 from dataclasses import replace
 from pathlib import Path
 
-from .config import Config, ConfigEntorno, ConfigFormacion, ConfigSimulacion
+from .config import Config, ConfigEntorno, ConfigFormacion
 from .estimacion import resumen_previo
 
 
