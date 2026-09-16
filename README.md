@@ -35,7 +35,7 @@ instalar nada ni necesitar servidor (para mirar).
 | [`docs/01-decisiones-de-diseno.md`](docs/01-decisiones-de-diseno.md) | Qué se construye y qué no: modelo físico, comportamientos, entornos, alcance de la v1. |
 | [`docs/02-fisica-y-matematicas.md`](docs/02-fisica-y-matematicas.md) | Explicación didáctica de la física y las matemáticas que ejecuta el simulador. |
 | [`docs/03-metricas-y-experimentos.md`](docs/03-metricas-y-experimentos.md) | Qué mide el software y cómo se comparan dos configuraciones con rigor. |
-| [`docs/04-escala-y-dimensionado.md`](docs/04-escala-y-dimensionado.md) | El caso de referencia (100 drones, 10 km²) y lo que esa escala impone al diseño. |
+| [`docs/04-escala-y-dimensionado.md`](docs/04-escala-y-dimensionado.md) | El caso de referencia (100 drones, 10 km², formación cohesionada a 10 m) y lo que esa escala impone al diseño. |
 
 ## Nombre
 

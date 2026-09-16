@@ -115,24 +115,31 @@ seguridad-eficacia) y la decisión de qué punto conviene es humana, no del algo
 
 Los que justifican el software, en orden de interés:
 
-1. **Barrido en franjas frente a reparto adaptativo Voronoi**, en los cuatro entornos. ¿Cuándo
-   compensa la complejidad del segundo?
-2. **Número de drones frente a tiempo de misión.** ¿Dónde está el punto en que añadir drones ya
+1. **Forma de la formación.** Línea en ala, rejilla, cuña. **El experimento principal**: decide el
+   ancho de barrido y, con él, un tiempo de misión que va de 17 minutos a casi 5 horas para la
+   misma zona. Contra eso, la línea ancha es frágil y no cabe en una calle.
+2. **Formación única frente a subenjambres divididos** (`k = 1, 2, 4, 10`), y dentro de B, reparto
+   fijo frente a adaptativo Voronoi. ¿Cuándo compensa dividir?
+3. **Ruptura y recomposición de la formación.** ¿A qué densidad de obstáculos se rompe, cuántos
+   segundos tarda en rehacerse y cuánto degrada la cobertura?
+4. **Altura de vuelo frente a separación.** La altura coherente con 10 m de separación son 5 m;
+   volar más alto multiplica la redundancia por el cuadrado. ¿Compensa alguna vez?
+5. **Número de drones frente a tiempo de misión.** ¿Dónde está el punto en que añadir drones ya
    no acelera la misión porque se estorban entre ellos?
-3. **Altura de vuelo.** Más altura cubre más por pasada pero gasta más y sufre más viento.
+6. **Altura de vuelo y resolución.** Más altura cubre más por pasada pero gasta más y sufre más viento.
    ¿Cuál es la altura óptima en Wh/m²?
-4. **Sensibilidad al viento.** ¿A partir de qué velocidad de viento la misión deja de ser viable?
-5. **Distancia de seguridad y horizonte de anticolisión.** El compromiso directo entre prudencia
+7. **Sensibilidad al viento.** ¿A partir de qué velocidad de viento la misión deja de ser viable?
+8. **Distancia de seguridad y horizonte de anticolisión.** El compromiso directo entre prudencia
    y eficacia.
-6. **Robustez ante fallos.** Si un dron cae a mitad de misión, ¿cuánto degrada cada estrategia?
+9. **Robustez ante fallos.** Si un dron cae a mitad de misión, ¿cuánto degrada cada estrategia?
    (Aquí el reparto adaptativo debería ganar con claridad.)
-7. **Umbral del radio de comunicación `R_com`.** Con los drones conociendo solo a sus vecinos,
-   ¿a partir de qué radio el reparto adaptativo supera al barrido fijo, y a partir de cuál deja de
-   mejorar? Probablemente **el experimento más interesante del proyecto**; ver
+10. **Retardo de propagación en la formación.** Con `R_com` pequeño, una orden tarda segundos en
+   recorrer un frente de 1 km y la línea se curva al girar. ¿Qué radio hace falta para un giro
+   limpio? Ver
    [`04-escala-y-dimensionado.md`](04-escala-y-dimensionado.md), §3.
-8. **Posición de la base.** Central, en esquina, o varias bases. En esta escala el tránsito domina
+11. **Posición de la base.** Central, en esquina, o varias bases. En esta escala el tránsito domina
    sobre el barrido, así que el impacto se mide en minutos de misión.
-9. **Densidad del bosque.** ¿A qué densidad de obstáculos se rompe la evitación por campos
+12. **Densidad del bosque.** ¿A qué densidad de obstáculos se rompe la evitación por campos
    potenciales?
 
 ---

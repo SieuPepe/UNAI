@@ -1,247 +1,291 @@
 # 04 — Escala y dimensionado del caso de referencia
 
-Documento derivado de las decisiones de escala tomadas: **100 drones**, **10 km²**,
-**conocimiento solo de los drones cercanos**, **batería únicamente medida**.
+> **Aviso.** Este documento reemplaza por completo a su versión anterior, que dimensionaba un
+> enjambre **disperso** (drones separados unos 158 m). Al fijarse una **separación máxima de 10 m
+> entre drones**, el enjambre pasa a ser una **formación cohesionada** y casi todas aquellas
+> conclusiones se invierten. Lo que sigue es el dimensionado correcto.
 
-Los números de aquí no son adorno: cambian decisiones concretas de implementación, y tres de
-ellas corrigen o matizan lo escrito en los documentos 01 y 02. Van señaladas.
+Decisiones de escala vigentes: **100 drones**, **10 km²**, **separación máxima de 10 m entre
+drones**, **conocimiento solo de los vecinos**, **batería únicamente medida**.
+Misión: **reconocimiento del terreno**.
 
----
-
-## 1. El caso de referencia
-
-| Parámetro | Valor |
-|---|---|
-| Drones | 100 |
-| Zona | 10 km² — un cuadrado de **3.162 × 3.162 m** |
-| Superficie por dron | 100.000 m² (10 hectáreas) |
-| Densidad | 10 drones por km² |
-| Conocimiento | Solo vecinos dentro de un radio `R_com` |
-| Batería | Se mide y se reporta; **no** condiciona la misión |
+**Los tres primeros son parámetros de configuración**, no constantes del programa. Los valores de
+arriba son los del caso de referencia; el software debe admitir cualquier otro sin tocar código.
 
 ---
 
-## 2. Primera consecuencia: es un enjambre MUY disperso
+## 1. Parámetros configurables
 
-Con 100 drones repartidos por 10 km², la separación media entre un dron y su vecino más cercano
-es de unos **158 metros**:
-
-```
-separación media ≈ 0,5 / raíz(densidad) = 0,5 / raíz(100/10.000.000) ≈ 158 m
-```
-
-Ciento cincuenta y ocho metros es *muchísimo* para drones que miden medio metro. Esto reordena
-las prioridades del proyecto:
-
-- **En crucero, la anticolisión casi no actúa.** Los drones sencillamente no se ven.
-- **Las colisiones se concentran en tres sitios**: el despegue y la recogida en la base (donde
-  están todos juntos), las **fronteras entre zonas** asignadas, y los **cuellos de botella** del
-  entorno (una calle urbana, un pasillo del almacén).
-- Por tanto, **los escenarios de prueba de la anticolisión deben provocar esos momentos** a
-  propósito: despegue simultáneo, cruce de zonas, reasignación de un área tras un fallo. Un
-  crucero tranquilo por campo abierto no prueba nada.
-
-> **Matiza el documento 01, §3.2.** La anticolisión sigue siendo obligatoria, pero su banco de
-> pruebas no es el vuelo normal, sino la congestión deliberada.
+| Parámetro | Símbolo | Valor de referencia | Rango previsto |
+|---|---|---|---|
+| Número de drones | `N` | 100 | 10 – 500 |
+| Superficie de la zona | `A` | 10 km² | 0,01 – 100 km² |
+| Separación máxima entre drones | `d_max` | 10 m | 2 – 500 m |
+| Altura de vuelo | `h` | 5 m (ver §3) | 2 – 100 m |
+| Forma de la formación | — | línea en ala | línea, rejilla `f × c`, cuña |
+| Radio de comunicación | `R_com` | 30 m | 10 – 500 m |
+| Velocidad de crucero | `v` | 15 m/s | 3 – 25 m/s |
 
 ---
 
-## 3. Segunda consecuencia: `R_com` pasa a ser el parámetro estrella
+## 2. Una ambigüedad que hay que resolver
 
-Al decidir que cada dron solo conoce a los cercanos, aparece un parámetro nuevo y central: el
-**radio de comunicación / percepción `R_com`**. Con la densidad de este proyecto:
+"Máximo 10 metros entre uno y otro" admite dos lecturas, y la diferencia es de dos órdenes de
+magnitud:
 
-| `R_com` | Vecinos de media |
-|---:|---:|
-| 150 m | 0,7 |
-| 300 m | 2,8 |
-| 500 m | 7,9 |
-| 800 m | 20,1 |
-| 1.000 m | 31,4 |
-| 1.500 m | 70,7 |
+| | Lectura A — **separación al vecino** | Lectura B — **diámetro total** |
+|---|---|---|
+| Qué significa | Cada dron tiene algún vecino a ≤ 10 m: el enjambre es una **malla conectada** que puede ser muy ancha. | Los 100 drones caben dentro de una esfera de 10 m. |
+| Geometría resultante | En línea: un frente de **990 m**. | 5,2 m³ por dron → separación real de **1,74 m**. |
+| Ancho de barrido | Hasta 1 km | 20 m |
+| Misión de 10 km² | **17 minutos** | **9,3 horas** |
+| Sensatez | Los 100 drones aportan cobertura. | Los 100 drones miran casi el mismo punto: el enjambre se comporta como un solo sensor. |
 
-Con radio de 150 m, un dron vuela **solo**: no tiene con quién coordinarse. Con 1.500 m ve a casi
-todo el enjambre y el sistema vuelve a ser, de hecho, centralizado. La zona interesante está en
-medio.
+**Se adopta la lectura A** como definición del caso de referencia, por ser la única que hace útil
+un enjambre de 100 unidades para reconocer 10 km². La lectura B queda disponible sin más que
+configurar una formación compacta, por si interesa como caso extremo.
 
-### Por qué esto afecta directamente a la cobertura
-
-Las dos estrategias de reparto del documento 01, §3.3 **no dependen igual de `R_com`**:
-
-- **Barrido en franjas:** las zonas se asignan antes de despegar. Un dron no necesita hablar con
-  nadie. Funciona con `R_com = 0`. A cambio, es rígido.
-- **Reparto adaptativo (Voronoi + Lloyd):** un dron necesita conocer a los vecinos que delimitan
-  su región para calcularla bien. Esos vecinos están, típicamente, a unas **dos o tres veces la
-  separación media**, es decir entre 300 y 500 m. Con `R_com` por debajo de eso, el dron **cree
-  que su región es más grande de lo que es**, se va hacia un centroide equivocado y aparecen
-  solapes y huecos.
-
-Esto convierte una decisión tuya en **el experimento más interesante del proyecto**:
-
-> *¿A partir de qué radio de comunicación compensa el reparto adaptativo frente al barrido fijo?
-> ¿Y a partir de qué radio deja de mejorar?*
-
-Se espera encontrar un umbral en torno a los 400-600 m y una saturación más allá de los 800 m.
-Ese es exactamente el tipo de respuesta que justifica construir este simulador.
-
-> **Amplía el documento 03, §4.** Se añade a la lista de experimentos previstos.
+> **Pendiente de confirmación del usuario.** Si lo que se quería era la lectura B, hay que
+> replantear el tamaño del enjambre o el de la zona: 9,3 horas exceden con mucho cualquier
+> autonomía real.
 
 ---
 
-## 4. Tercera consecuencia: el tránsito domina sobre el barrido
+## 3. El hallazgo principal: la separación y la altura están acopladas
 
-Cada dron recibe una zona de unos 316 × 316 m. Con una cámara de 90° de apertura, el ancho de
-pasada es dos veces la altura de vuelo, y descontando un 20 % de solape:
+Con una cámara de 90° de apertura, la huella en el suelo mide **el doble de la altura de vuelo**.
+Y si los drones van separados 10 m, esa huella determina cuánto se solapan:
 
-| Altura | Ancho de pasada | Ancho útil | Camino a recorrer | Tiempo de barrido | Resolución |
-|---:|---:|---:|---:|---:|---:|
-| 20 m | 40 m | 32 m | 3.125 m | 208 s | 1,0 cm/píxel |
-| 35 m | 70 m | 56 m | 1.786 m | 119 s | 1,8 cm/píxel |
-| 50 m | 100 m | 80 m | 1.250 m | 83 s | 2,5 cm/píxel |
-| 80 m | 160 m | 128 m | 781 m | 52 s | 4,0 cm/píxel |
-
-(Tiempos a 15 m/s. Resolución estimada con un sensor de 4.000 píxeles de ancho.)
-
-Ahora compárese con el **tránsito**: ir desde la base hasta la esquina opuesta de la zona son
-4.472 m en diagonal, es decir **298 segundos**.
-
-El resultado es contundente: **llegar a la zona cuesta más que barrerla.** A 50 m de altura, un
-dron gasta 83 segundos trabajando y hasta 298 desplazándose.
-
-Decisiones que se derivan de esto:
-
-1. **La asignación de zonas debe minimizar el tránsito**, no solo repartir superficie: a cada dron
-   la zona que le pilla más cerca. Un reparto que ignore esto puede duplicar el tiempo de misión
-   sin cubrir un metro cuadrado más.
-2. **La posición de la base es un parámetro de experimentación**, no un detalle. Base central
-   frente a base en esquina frente a varias bases: el impacto es de minutos.
-3. **Volar alto sale muy rentable en esta escala**, porque ahorra en la parte cara. Pero se paga
-   en resolución y en exposición al viento (que a 80 m es notablemente más fuerte que a 20). Es
-   justo el compromiso que el software debe cuantificar.
-4. Misión completa estimada: **entre 6 y 10 minutos de vuelo**, holgadamente dentro de los 25-30
-   minutos de autonomía de un multirrotor. **La escala elegida es viable.**
-
----
-
-## 5. Cuarta consecuencia: no hace falta rejilla espacial
-
-> **Corrige el documento 02, §12.**
-
-El documento 02 explica que buscar vecinos comparando todos contra todos tiene coste cuadrático y
-que la solución es una rejilla espacial. El principio es correcto, pero **a 100 drones la
-conclusión práctica se invierte**:
-
-```
-100 drones  ->  matriz de distancias de 100 × 100 = 10.000 números por paso
-mision de 15 min a 20 Hz = 18.000 pasos
-total: 180 millones de operaciones -> NumPy lo resuelve en segundos
-```
-
-Una matriz de 100×100 ocupa 80 kilobytes y NumPy la calcula de una sola vez, sin bucles. Montar
-una rejilla espacial en Python implicaría bucles a nivel de Python en cada paso, y **saldría más
-lento** que la fuerza bruta vectorizada.
-
-**Decisión: la v1 usa la matriz densa.** La rejilla espacial queda documentada como la ampliación
-necesaria si algún día se pasa de ~500 drones, y no antes. Es un caso claro de no optimizar lo
-que no duele.
-
-*(La búsqueda de vecinos por `R_com` se hace sobre esa misma matriz: basta con enmascarar las
-distancias mayores que el radio. Cero coste añadido.)*
-
----
-
-## 6. El tamaño de los resultados
-
-Una misión de 15 minutos con 100 drones son 1,8 millones de estados de dron. Guardarlos todos y
-meterlos en un HTML de doble clic no es gratis:
-
-| Frecuencia de registro | Fotogramas | `float32` | `int16` | Incrustado en HTML |
-|---:|---:|---:|---:|---:|
-| 20 Hz (todos) | 18.000 | 21,6 MB | 10,8 MB | 14,5 MB |
-| 10 Hz | 9.000 | 10,8 MB | 5,4 MB | 7,2 MB |
-| **5 Hz** | **4.500** | 5,4 MB | **2,7 MB** | **3,6 MB** |
-
-**Decisión:**
-
-- La **física se calcula a 20 Hz** (no se toca: es lo que da precisión).
-- Las **trayectorias se registran a 5 Hz** y el visor **interpola** entre fotogramas. El ojo no
-  distingue la diferencia; 5 fotogramas por segundo de vuelo simulado bastan de sobra para una
-  reproducción suave, sobre todo pudiendo cambiar la velocidad de reproducción.
-- Las posiciones se guardan como **enteros de 16 bits** referidos a los límites de la zona. Sobre
-  3.162 metros, eso da una precisión de **4,8 centímetros**: muy por encima de lo que necesita un
-  dibujo, y la mitad de tamaño que los decimales.
-- Resultado: un visor autónomo de **unos 4 MB**, que abre sin problema con doble clic.
-- Las **métricas sí se calculan a 20 Hz**, sobre todos los pasos. La distancia mínima entre drones
-  no se puede muestrear: si se mira solo 5 veces por segundo, se puede pasar por alto justo el
-  instante del roce.
-
----
-
-## 7. La rejilla de cobertura
-
-| Tamaño de celda | Celdas | Memoria |
+| Altura | Huella | Redundancia con separación de 10 m |
 |---:|---:|---:|
-| 5 m | 400.000 | 0,80 MB |
-| **10 m** | **100.000** | **0,20 MB** |
-| 20 m | 25.000 | 0,05 MB |
+| **5 m** | **10 m** | **1,0× — cobertura exacta, sin huecos ni solape** |
+| 10 m | 20 m | 4× |
+| 20 m | 40 m | 16× |
+| 50 m | 100 m | 100× |
 
-**Decisión: 10 metros por defecto**, configurable. Es la décima parte del ancho de pasada a 50 m
-de altura, lo bastante fino para detectar huecos reales y lo bastante grueso para no inflar el
-fichero. Cada celda guarda el **instante** de la primera visita (no solo un sí/no), que es lo que
-permite dibujar en el visor cómo se va "pintando" el mapa con el tiempo y calcular la curva de
-cobertura del documento 03.
+A 50 m de altura, cada punto del terreno lo estarían mirando **cien drones a la vez**: el enjambre
+haría cien veces el mismo trabajo. La separación de 10 m solo tiene sentido si se vuela **bajo**.
 
----
+```
+altura óptima = separación / 2      (para una cámara de 90°)
+              = 10 / 2 = 5 metros
+```
 
-## 8. Cada entorno a su escala
+Esto reencuadra el proyecto entero, y para bien:
 
-**El caso de 10 km² no vale para los cuatro entornos.** Conviene decirlo claro antes de
-programar: un almacén de 10 km² no existe.
+- Es una misión de **reconocimiento a baja cota**, no un vuelo de fotogrametría en altura.
+- A 5 metros del suelo, el dron vuela **entre los obstáculos**, no por encima. La evitación de
+  obstáculos deja de ser una precaución y pasa a ser el comportamiento que más trabaja.
+- Con los drones a 10 m unos de otros y maniobrando entre obstáculos, la **anticolisión está
+  activa permanentemente**.
 
-| Entorno | Escala | Drones | Observaciones |
-|---|---|---:|---|
-| **Campo abierto** | 10 km² | 100 | El caso de referencia. |
-| **Urbano** | 10 km² | 100 | ~1.000 manzanas de 100 m. Se almacenan explícitamente, sin problema. |
-| **Bosque** | 10 km² | 100 | Ver aviso abajo. |
-| **Interior / almacén** | 200 × 150 m (0,03 km²) | 10-20 | Escenario aparte, con sus propias métricas. Aquí sí hay congestión permanente, y es donde la anticolisión se pone realmente a prueba. |
-
-### Aviso sobre el bosque
-
-Un bosque real tiene entre 500 y 1.000 árboles por hectárea. En 10 km² eso son **entre 5 y 10
-millones de troncos**. No se pueden guardar en una lista ni dibujar todos.
-
-**Decisión: bosque procedural.** Los árboles no se almacenan: se *calculan* a demanda a partir de
-las coordenadas de la celda y la semilla de la simulación. Preguntar "¿qué árboles hay cerca de
-este dron?" devuelve siempre los mismos árboles para la misma semilla, sin haber guardado ninguno.
-Memoria: cero. El visor dibuja únicamente los árboles próximos a la cámara.
+> **Invierte el §2 de la versión anterior de este documento**, que concluía que la anticolisión
+> apenas actuaría. Con formación cohesionada ocurre justo lo contrario: es el comportamiento
+> dominante y el que marca los límites de todo lo demás.
 
 ---
 
-## 9. La batería: se mide, no limita
+## 4. La forma de la formación es la decisión de mayor impacto
 
-Conforme a lo decidido, **no** habrá lógica de regreso a base por batería baja. La simulación
-continúa aunque el consumo teórico supere la capacidad.
+El enjambre barre como una sola brocha, y el ancho de esa brocha depende de cómo se coloquen los
+100 drones. A 5 m de altura y 15 m/s:
 
-Pero sí se reporta, porque sigue siendo información útil para comparar configuraciones:
+| Formación | Frente | Ancho de pasada | Pases | Barrido | Giros | **Total** |
+|---|---:|---:|---:|---:|---:|---:|
+| **Línea en ala (100 × 1)** | 990 m | 1.000 m | 4 | 14,1 min | 3,3 min | **17,4 min** |
+| 50 × 2 | 490 m | 500 m | 7 | 24,6 min | 3,3 min | 27,9 min |
+| 25 × 4 | 240 m | 250 m | 13 | 45,7 min | 3,3 min | 49,0 min |
+| 10 × 10 (bloque) | 90 m | 100 m | 32 | 112,4 min | 3,4 min | 115,9 min |
+| 4 × 25 (columna) | 30 m | 40 m | 80 | 281,1 min | 3,5 min | 284,6 min |
 
-- Energía total y **energía por metro cuadrado cubierto** (la métrica de coste real).
-- Batería restante del dron que peor acaba.
-- **Marca de autonomía excedida**: si algún dron habría agotado la batería, se registra en qué
-  segundo y qué porcentaje de misión quedaba pendiente en ese momento. La simulación no se
-  detiene, pero el resultado queda etiquetado como *"no realizable con esta autonomía"*.
+**De 17 minutos a 4 horas y 45 minutos, con los mismos 100 drones y la misma zona.** Un factor de
+16 decidido únicamente por la geometría. Es, con diferencia, el parámetro más influyente del
+proyecto, y **el experimento principal pasa a ser este**.
 
-Así la configuración se puede comparar igual, sabiendo que sería inviable en la práctica.
+El resultado es intuitivo una vez visto: para barrer, lo que importa es el **frente**, y una línea
+maximiza el frente por dron. Todo lo que no sea anchura es profundidad desaprovechada.
+
+Lo que la tabla no dice, y el simulador sí dirá:
+
+- Una línea de 1 km es **frágil**: más difícil de mantener, más lenta al girar, y basta un
+  obstáculo para partirla.
+- Una línea de 1 km **no cabe** en una calle urbana ni en un pasillo. En entorno urbano la
+  formación tendrá que deformarse o dividirse, y ahí las formas compactas recuperan terreno.
+- Con 4 pases, el ancho de pasada (1.000 m) y el lado de la zona (3.162 m) no encajan: el cuarto
+  pase desperdicia un 26 % de su recorrido fuera de la zona. Ajustar el frente a un divisor del
+  lado es una optimización barata.
+
+### El giro, que no es gratis
+
+Al final de cada pasada hay que dar la vuelta, y con un frente de 1 km eso no es un detalle:
+
+| Maniobra | Coste |
+|---|---:|
+| **Rotar 180° sobre el centro** — el dron exterior recorre un semicírculo de 1.555 m | 104 s |
+| **Giro en espejo** — nadie rota: cada dron invierte su rumbo y se desplaza lateralmente | **66 s** |
+
+El giro en espejo es más rápido y, sobre todo, **no exige que el dron exterior vuele a tope
+mientras el interior casi se para**, que es el problema real de rotar una formación ancha. Como el
+frente es simétrico, invertir el sentido de la marcha es equivalente a haber girado.
 
 ---
 
-## 10. Resumen de cambios sobre los documentos anteriores
+## 5. La cohesión de 10 m entra en la v1 (y no estaba prevista)
 
-| Documento | Cambio |
+> **Cambia el documento 01, §3.** Allí se dejó explícitamente fuera de la primera versión el
+> control de formaciones. La restricción de 10 m **es** control de formación, así que entra.
+
+Mantener a 100 drones a ≤ 10 m unos de otros mientras esquivan obstáculos es un comportamiento por
+derecho propio, y hay que implementarlo. Se hará como una fuerza más de las del documento 02, §4:
+una **atracción hacia la posición que le corresponde al dron en la formación**, que compite con la
+repulsión de los obstáculos y con la anticolisión.
+
+### Y tiene que ser una restricción BLANDA
+
+Este es el punto crítico, y lo demuestran los números del bosque:
+
+| Densidad | Un árbol cada… | ¿Cabe una formación rígida de 10 m? |
+|---:|---:|---|
+| 200 árboles/ha | 7,1 m | **No** |
+| 500 árboles/ha | 4,5 m | **No** |
+| 1.000 árboles/ha | 3,2 m | **No** |
+
+En un bosque real los huecos entre árboles son **más estrechos que la separación de la formación**.
+Una formación rígida de 10 m sencillamente no puede atravesar un bosque: los drones tendrían que
+volar a través de los troncos.
+
+**Decisión: `d_max` se implementa como objetivo, no como candado.**
+
+- Es una **fuerza de cohesión** que tira del dron hacia su sitio, no una atadura geométrica.
+- Ante un obstáculo, la evitación **tiene prioridad**: el dron rompe formación, pasa, y vuelve.
+- La separación real se **mide y se reporta** (media, máxima, y segundos fuera de tolerancia).
+  Que la formación se deshaga y se rehaga es un resultado legítimo, y medir cuánto y cuándo es
+  precisamente lo interesante.
+- Existirá un modo estricto opcional que cuente cada violación como fallo, para quien quiera
+  imponerla de verdad.
+
+Esto convierte una limitación en uno de los mejores experimentos disponibles: **¿a qué densidad de
+obstáculos se rompe una formación, y cuánto tarda en recomponerse?**
+
+---
+
+## 6. El reparto adaptativo de zonas ya no aplica como estaba pensado
+
+> **Cambia el documento 01, §3.3.**
+
+La estrategia Voronoi + Lloyd consistía en que cada dron se hiciera cargo de la porción de terreno
+más cercana a él. Eso **exige que los drones se separen** para repartirse 10 km². Si están
+obligados a permanecer a 10 m unos de otros, no pueden repartirse nada: sus regiones de Voronoi
+serían parcelas de 10 × 10 m dentro de la propia formación.
+
+Las dos estrategias de cobertura pasan a ser otras:
+
+- **A — Formación única.** Los 100 drones como una sola brocha que recorre la zona en zigzag. Es
+  la tabla del §4.
+- **B — Enjambres divididos.** El enjambre se parte en `k` subenjambres cohesionados internamente
+  (10 de 10, 4 de 25, 2 de 50…), y **el reparto Voronoi + Lloyd reaparece a nivel de subenjambre**:
+  cada grupo se hace cargo de una región. Se recupera así toda la ventaja del reparto adaptativo
+  —adaptación a zonas prioritarias, reconfiguración automática si un grupo falla— pero aplicada a
+  grupos en lugar de a individuos.
+
+La comparación A frente a B es el segundo experimento del proyecto. Nótese que B con `k = 1`
+es A: la misma implementación cubre ambos casos, con `k` como parámetro.
+
+---
+
+## 7. El radio de comunicación cambia de papel
+
+En la versión dispersa, `R_com` decidía si los drones podían coordinarse siquiera. Ahora, con
+vecinos a 10 m, casi cualquier radio garantiza conectividad local. Pero aparece un efecto nuevo y
+más sutil: **la información tarda en recorrer la formación**.
+
+| `R_com` | Vecinos (en línea) | Saltos para cruzar el frente | Tiempo de propagación |
+|---:|---:|---:|---:|
+| 15 m | 2 | 99 | 4,95 s |
+| 30 m | 6 | 33 | 1,65 s |
+| 50 m | 10 | 20 | 1,00 s |
+| 100 m | 20 | 10 | 0,50 s |
+
+Un frente de 1 km con radio de 15 m tarda **casi 5 segundos** en que una orden llegue de un extremo
+al otro. A 15 m/s, eso son 75 metros recorridos antes de que la formación entera reaccione: al
+girar, un extremo empieza la maniobra cuando el otro todavía no se ha enterado, y la línea se
+curva. Ese arrastre es un fenómeno real de los enjambres distribuidos, y el simulador lo
+reproducirá solo, sin programarlo explícitamente, por el mero hecho de limitar quién habla con
+quién.
+
+El experimento se mantiene, reformulado: **¿cuánto deforma la formación el retardo de propagación,
+y qué radio hace falta para que la línea gire limpia?**
+
+---
+
+## 8. El paso de integración se queda corto
+
+Con drones a 10 m y velocidades de cierre de hasta 30 m/s:
+
+| `dt` | Avance por paso | Acercamiento entre dos drones de frente | % de la separación |
+|---:|---:|---:|---:|
+| 0,05 s | 0,75 m | 1,50 m | **15 %** |
+| **0,02 s** | 0,30 m | 0,60 m | **6 %** |
+| 0,01 s | 0,15 m | 0,30 m | 3 % |
+
+Consumir el 15 % de la separación en un solo paso es demasiado: la anticolisión reaccionaría a
+saltos y aparecerían roces artificiales, provocados por el simulador y no por el algoritmo.
+
+**Decisión: `dt = 0,02 s` (50 Hz) por defecto, configurable.** Multiplica por 2,5 el tiempo de
+cálculo, que sigue siendo perfectamente asumible a 100 drones (§9).
+
+> **Ajusta el documento 02, §1**, donde se fijó `dt = 0,05 s` razonando sobre obstáculos de varios
+> metros. El criterio era correcto; lo que ha cambiado es que ahora la distancia crítica no es el
+> tamaño del obstáculo, sino la separación entre drones.
+
+---
+
+## 9. Lo que no cambia
+
+**Sigue sin hacer falta rejilla espacial.** Una matriz de distancias de 100 × 100 son 10.000
+números que NumPy calcula de golpe. Que ahora los drones estén juntos en lugar de dispersos no
+altera el coste: la matriz es la misma. A 50 Hz y 20 minutos son 60.000 pasos, que siguen
+resolviéndose en segundos. La rejilla sigue siendo la respuesta correcta a partir de ~500 drones,
+y no antes.
+
+**El tamaño del resultado sigue siendo cómodo.** Registro a 5 Hz con enteros de 16 bits:
+
+| Duración | Fotogramas | Datos | Incrustado en HTML |
+|---:|---:|---:|---:|
+| 17 min | 5.100 | 3,1 MB | 4,1 MB |
+| 20 min | 6.000 | 3,6 MB | 4,8 MB |
+| 30 min | 9.000 | 5,4 MB | 7,2 MB |
+
+**La rejilla de cobertura baja a 5 m de celda**, no 10: la huella a 5 m de altura mide 10 m, y
+medir con celdas del tamaño de la huella no detecta huecos. 5 m sobre 10 km² son 400.000 celdas,
+0,8 MB. Asumible.
+
+---
+
+## 10. Lo que ya no vale de la versión anterior
+
+| Afirmación anterior | Estado |
 |---|---|
-| 01, §3.2 | La anticolisión se prueba en congestión provocada, no en crucero. |
-| 01, §8 | Las cuatro cuestiones abiertas quedan cerradas. |
-| 02, §12 | A 100 drones **no** se usa rejilla espacial: matriz densa vectorizada. |
-| 03, §4 | Nuevo experimento: umbral de `R_com` para que el reparto adaptativo compense. |
-| — | Nuevo parámetro central del proyecto: `R_com`. |
-| — | Nuevo parámetro de experimentación: la posición de la base. |
-| — | El entorno interior corre a escala propia, con su propio caso de referencia. |
+| Separación media de 158 m entre drones | **Anulada.** Ahora son 10 m por diseño. |
+| La anticolisión apenas actúa en crucero | **Invertida.** Actúa permanentemente. |
+| Hay que provocar congestión para probarla | **Innecesario.** La congestión es el estado normal. |
+| El tránsito domina sobre el barrido | **Anulada.** Con un frente de 1 km, el barrido domina. |
+| La posición de la base es parámetro clave | **Degradada.** Sigue contando, pero mucho menos. |
+| `R_com` decide si el reparto adaptativo funciona | **Reformulada.** Ahora decide el retardo de propagación (§7). |
+| Voronoi + Lloyd entre drones individuales | **Sustituida** por Voronoi entre subenjambres (§6). |
+| Volar alto es rentable | **Invertida.** Volar alto multiplica la redundancia (§3). |
+| Sin rejilla espacial; matriz densa | **Se mantiene.** |
+| Bosque procedural; interior a escala propia | **Se mantiene.** |
+
+---
+
+## 11. Resumen de decisiones nuevas
+
+1. Se adopta la lectura A de la separación (malla conectada), pendiente de confirmación.
+2. Altura por defecto **5 m**, derivada de la separación de 10 m y no elegida a mano.
+3. La **forma de la formación** es el parámetro de mayor impacto y el experimento principal.
+4. El giro se hace **en espejo**, no rotando.
+5. La cohesión entra en la v1, implementada como **fuerza blanda** con prioridad a la evitación.
+6. El reparto Voronoi sube de nivel: entre **subenjambres**, con `k` configurable.
+7. `dt` baja a **0,02 s**.
+8. La rejilla de cobertura baja a **5 m** de celda.

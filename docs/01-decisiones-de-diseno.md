@@ -80,21 +80,47 @@ van a cruzar peligrosamente y corrige antes. La maniobra es **recíproca**: si l
 ven, cada uno hace la mitad del esfuerzo, lo que evita el efecto "baile" de dos personas que se
 esquivan mutuamente en un pasillo.
 
-### 3.3 Misiones de cobertura
-El enjambre barre una zona: reparto del área entre los drones, recorrido eficiente y registro de
-qué porcentaje queda cubierto y en cuánto tiempo. Se implementarán dos estrategias, para poder
-compararlas entre sí:
+Con la separación máxima de 10 m fijada para el enjambre, este comportamiento **está activo de
+forma permanente**, no solo en momentos de congestión. Es el que marca los límites de todo lo
+demás. Ver [`04-escala-y-dimensionado.md`](04-escala-y-dimensionado.md), §3.
 
-- **Barrido en franjas** (tipo cortacésped): la zona se parte en bandas y cada dron recorre las
-  suyas en zigzag. Predecible y exhaustivo.
-- **Reparto adaptativo por regiones** (Voronoi + Lloyd): cada dron se hace cargo de la porción de
-  terreno más cercana a él y se va recolocando. Se adapta solo si un dron cae o si la zona tiene
-  partes más importantes que otras.
+### 3.3 Cohesión de la formación
+
+El enjambre vuela junto: cada dron mantiene una separación máxima `d_max` (10 m en el caso de
+referencia) respecto a sus vecinos. Se implementa como **fuerza blanda** —una atracción hacia el
+puesto que le toca en la formación— y **no** como atadura geométrica, porque en un bosque los
+huecos entre árboles son más estrechos que la propia formación y una formación rígida
+sencillamente no cabe. Ante un obstáculo, la evitación tiene prioridad: el dron rompe formación,
+pasa y se reincorpora. Cuánto se deshace y cuánto tarda en recomponerse es una métrica, no un
+fallo.
+
+La **forma de la formación** (línea en ala, rejilla de `f × c`, cuña) es configurable y resulta ser
+el parámetro de mayor impacto de todo el proyecto: decide el ancho de barrido y, con él, el tiempo
+de misión.
+
+### 3.4 Misiones de cobertura
+
+El enjambre barre una zona en reconocimiento a baja cota y se registra qué porcentaje queda
+cubierto y en cuánto tiempo. Dos estrategias comparables entre sí:
+
+- **A — Formación única.** Los 100 drones como una sola brocha que recorre la zona en zigzag. El
+  ancho de la brocha lo da la forma de la formación.
+- **B — Enjambres divididos.** El enjambre se parte en `k` subenjambres, y el reparto adaptativo
+  **Voronoi + Lloyd** opera entre grupos: cada subenjambre se hace cargo de la región que le queda
+  más cerca y se recoloca solo si otro falla o si hay zonas prioritarias.
+
+Con `k = 1`, B es A: la misma implementación cubre ambas, con `k` como parámetro.
+
+> El reparto Voronoi **entre drones individuales**, previsto en la versión inicial de este
+> documento, queda descartado: exigía que los drones se separasen para repartirse el terreno, lo
+> que es incompatible con mantenerlos a 10 m. Ver
+> [`04-escala-y-dimensionado.md`](04-escala-y-dimensionado.md), §6.
 
 ### Fuera de la v1 (pero previsto)
-Flocking (bandada emergente) y formaciones geométricas. No se descartan: el sistema de
-comportamientos será una lista de "fuerzas" combinables, así que añadirlos después es agregar
-piezas, no rediseñar.
+
+Flocking de bandada emergente al estilo Reynolds, como alternativa a la formación con puestos
+asignados. El sistema de comportamientos es una lista de fuerzas combinables, así que añadirlo es
+agregar una pieza, no rediseñar.
 
 ---
 
@@ -177,9 +203,18 @@ conviene usar rejilla espacial—. Todo ello está analizado y cuantificado en
 [`04-escala-y-dimensionado.md`](04-escala-y-dimensionado.md), **de lectura obligada antes de
 implementar**.
 
-Dos parámetros nuevos, nacidos de estas decisiones, pasan a ser centrales del proyecto:
+A ello se añade una restricción posterior que reordena el diseño: **los drones vuelan a una
+separación máxima de 10 m entre sí**, de modo que el enjambre es una formación cohesionada y no un
+conjunto disperso. `N`, `A` y `d_max` son **parámetros de configuración**; los valores citados son
+los del caso de referencia.
 
-- **`R_com`**, el radio de comunicación entre drones. Determina cuánto sabe cada dron del resto y,
-  con ello, si el reparto adaptativo de zonas puede funcionar siquiera.
-- **La posición de la base**, porque en esta escala el desplazamiento hasta la zona de trabajo
-  consume más tiempo que el trabajo en sí.
+Parámetros centrales del proyecto, por orden de influencia:
+
+- **La forma de la formación.** Decide el ancho de barrido y con él el tiempo de misión: entre 17
+  minutos y casi 5 horas para la misma zona y los mismos 100 drones.
+- **`d_max`**, la separación máxima entre drones (10 m).
+- **La altura de vuelo**, que no se elige libremente: queda acoplada a `d_max` por la huella de la
+  cámara. Con 10 m de separación, la altura coherente es de 5 m.
+- **`R_com`**, el radio de comunicación, que ahora determina cuánto tarda una orden en recorrer la
+  formación de un extremo al otro.
+- **La posición de la base**, de influencia menor con un frente de barrido ancho.

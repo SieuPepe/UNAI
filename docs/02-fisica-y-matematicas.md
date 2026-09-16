@@ -36,6 +36,12 @@ distancia recorrida en un paso = velocidad × dt = 15 m/s × 0,05 s = 0,75 metro
 
 Con obstáculos de varios metros, 0,75 m por paso es seguro.
 
+> **Ajuste para este proyecto.** La distancia crítica no acaba siendo el tamaño del obstáculo,
+> sino la **separación entre drones**, que es de 10 m. Dos drones que se acercan de frente recortan
+> 1,5 m por paso con `dt = 0,05`, un 15 % de su separación: demasiado, la anticolisión reaccionaría
+> a saltos. **El valor por defecto pasa a `dt = 0,02 s` (50 Hz)**, donde el acercamiento es del 6 %.
+> Ver [`04-escala-y-dimensionado.md`](04-escala-y-dimensionado.md), §8.
+
 ---
 
 ## 2. El estado de un dron: qué números lo describen
