@@ -126,7 +126,13 @@ Los que justifican el software, en orden de interés:
    y eficacia.
 6. **Robustez ante fallos.** Si un dron cae a mitad de misión, ¿cuánto degrada cada estrategia?
    (Aquí el reparto adaptativo debería ganar con claridad.)
-7. **Densidad del bosque.** ¿A qué densidad de obstáculos se rompe la evitación por campos
+7. **Umbral del radio de comunicación `R_com`.** Con los drones conociendo solo a sus vecinos,
+   ¿a partir de qué radio el reparto adaptativo supera al barrido fijo, y a partir de cuál deja de
+   mejorar? Probablemente **el experimento más interesante del proyecto**; ver
+   [`04-escala-y-dimensionado.md`](04-escala-y-dimensionado.md), §3.
+8. **Posición de la base.** Central, en esquina, o varias bases. En esta escala el tránsito domina
+   sobre el barrido, así que el impacto se mide en minutos de misión.
+9. **Densidad del bosque.** ¿A qué densidad de obstáculos se rompe la evitación por campos
    potenciales?
 
 ---

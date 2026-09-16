@@ -160,11 +160,26 @@ Se enumeran para que las decisiones de hoy no las bloqueen:
 
 ---
 
-## 8. Cuestiones ABIERTAS
+## 8. Escala del caso de referencia — CERRADO
 
-| # | Cuestión | Por qué importa |
+Las cuatro cuestiones que quedaban abiertas han sido resueltas:
+
+| # | Cuestión | Decisión |
 |---|---|---|
-| A1 | ¿Cuántos drones como máximo debe aguantar con soltura? (¿30, 100, 500?) | Determina si hace falta optimizar la búsqueda de vecinos desde el principio. |
-| A2 | ¿Tamaño típico de la zona a cubrir? (¿una manzana, un polígono industrial, varios km²?) | Afecta a la escala, la autonomía necesaria y el tamaño de los ficheros de resultado. |
-| A3 | ¿Los drones conocen la posición de todos los demás, o solo de los cercanos? | Es la diferencia entre un enjambre "centralizado" y uno realmente distribuido. |
-| A4 | ¿Se modela la batería como limitación real de la misión (con regreso a base) o solo se mide? | Cambia si la misión puede fracasar por autonomía. |
+| A1 | Tamaño del enjambre | **100 drones.** |
+| A2 | Zona a cubrir | **10 km²** (un cuadrado de 3.162 × 3.162 m). |
+| A3 | Conocimiento del enjambre | **Solo los vecinos cercanos**, dentro de un radio de comunicación `R_com`. Enjambre genuinamente distribuido. |
+| A4 | Batería | **Solo se mide.** No provoca regreso a base ni aborta la misión; se reporta el consumo y se marca la misión como no realizable si se excede la autonomía. |
+
+Estas cifras tienen consecuencias de calado sobre el resto del diseño —entre otras, que el
+enjambre resulta muy disperso, que el tránsito pesa más que el barrido, y que a 100 drones no
+conviene usar rejilla espacial—. Todo ello está analizado y cuantificado en
+[`04-escala-y-dimensionado.md`](04-escala-y-dimensionado.md), **de lectura obligada antes de
+implementar**.
+
+Dos parámetros nuevos, nacidos de estas decisiones, pasan a ser centrales del proyecto:
+
+- **`R_com`**, el radio de comunicación entre drones. Determina cuánto sabe cada dron del resto y,
+  con ello, si el reparto adaptativo de zonas puede funcionar siquiera.
+- **La posición de la base**, porque en esta escala el desplazamiento hasta la zona de trabajo
+  consume más tiempo que el trabajo en sí.

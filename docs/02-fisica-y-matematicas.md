@@ -579,6 +579,21 @@ multiplicar los drones por 10 multiplica el trabajo por 10, no por 100.
 Es el mismo principio que usa un mapa por cuadrículas: para buscar un restaurante cercano no
 recorres la guía entera, miras tu cuadrícula.
 
+### Pero ojo: a 100 drones, la fuerza bruta gana
+
+El razonamiento anterior explica el **principio**, y es correcto. La conclusión práctica para este
+proyecto, sin embargo, es la contraria, y conviene saberlo antes de escribir código.
+
+Con 100 drones, la tabla de todas las distancias entre todos es una matriz de 100 × 100 = 10.000
+números, que ocupa 80 kilobytes y que NumPy calcula **de una sola vez, sin bucles**. Montar una
+rejilla espacial en Python obligaría a recorrer cubos y listas en cada uno de los 18.000 pasos, y
+saldría **más lento** que la fuerza bruta vectorizada.
+
+La lección general vale más que el caso concreto: *el algoritmo asintóticamente mejor no siempre
+es el más rápido en la escala real del problema*. La rejilla espacial es la respuesta correcta a
+partir de unos 500 drones. Por debajo, es complejidad que no paga. Ver
+[`04-escala-y-dimensionado.md`](04-escala-y-dimensionado.md), §5.
+
 ---
 
 ## 13. El ciclo completo, paso a paso
