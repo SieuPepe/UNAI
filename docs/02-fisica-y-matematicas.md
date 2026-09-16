@@ -472,6 +472,13 @@ r_huella = h · tan(─────)
 Ejemplo: cámara de 90° de apertura a 30 metros de altura → `r = 30 · tan(45°) = 30 metros`.
 A 60 metros de altura, ve 60 metros de radio.
 
+**Y las huellas tienen que solaparse, no solo tocarse.** Si se vuela a la altura exacta para que
+la huella mida lo mismo que la separación entre drones, las huellas quedan tangentes: se rozan en
+un punto. Geométricamente eso basta, pero el borde de una circunferencia tiene grosor cero, y
+cualquier desvío de posición, ráfaga de viento o variación de altura abre una franja sin
+reconocer. En este proyecto costó un 4,5 % de cobertura hasta que se detectó. La regla es la misma
+que rige el solape entre pasadas, unas líneas más abajo: **10-20 % de margen**.
+
 De aquí sale el **compromiso fundamental de toda misión de cobertura**: subir cubre más superficie
 por pasada (el área crece con el *cuadrado* de la altura) pero con menos resolución por píxel,
 más viento y más consumo. Es justo el tipo de decisión que este software está pensado para

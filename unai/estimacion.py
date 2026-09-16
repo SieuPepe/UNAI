@@ -63,7 +63,8 @@ def resumen_previo(cfg: Config) -> dict:
 
     return {
         "altura_vuelo_m": round(altura, 2),
-        "altura_sin_solape_m": round(dron.altura_sin_solape_m(separacion), 2),
+        "altura_tangente_m": round(dron.altura_sin_solape_m(separacion), 2),
+        "solape_pct": round(form.solape_fraccion * 100.0, 1),
         "huella_m": round(huella, 2),
         "redundancia": round(redundancia, 2),
         "frente_m": round(frente, 1),
@@ -95,17 +96,18 @@ def _avisos(cfg: Config, redundancia: float, altura: float) -> list[str]:
             f"que exige el horizonte de anticolisión: el horizonte real será de "
             f"{efectivo:.1f} s en vez de {comp.anti_horizonte_s:.1f} s."
         )
-    if redundancia > 4.0:
+    if redundancia > 4.0 and form.altura_m is not None:
         avisos.append(
             f"A {altura:.0f} m de altura la huella mide {dron.huella_m(altura):.0f} m y los "
             f"drones van a {form.separacion_max_m:.0f} m: cada punto lo miran "
             f"{redundancia:.0f} drones a la vez. La altura sin solape sería "
             f"{dron.altura_sin_solape_m(form.separacion_max_m):.1f} m."
         )
-    elif redundancia < 0.6:
+    elif redundancia < 1.05:
         avisos.append(
-            f"La separación ({form.separacion_max_m:.0f} m) supera a la huella "
-            f"({dron.huella_m(altura):.0f} m): quedarán franjas sin reconocer entre drones."
+            f"La huella ({dron.huella_m(altura):.1f} m) apenas cubre la separación "
+            f"({form.separacion_max_m:.0f} m): sin solape, cualquier desvío de posición abre "
+            f"franjas sin reconocer. Se recomienda un solape del 10-20 %."
         )
     if ent.tipo == "bosque":
         hueco = 1.0 / math.sqrt(max(ent.densidad_arboles_m2, 1e-9))

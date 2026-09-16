@@ -70,8 +70,15 @@ def simular(
     modelo = ModeloCinematico(enj.dron, motor)
     comp = Comportamientos(cfg.comportamiento, enj, motor)
     metricas = Metricas(cfg, motor)
+    # La brocha es más ancha que el paso entre pasadas, así que los drones de
+    # los extremos vuelan fuera de la zona: con un frente de 990 m sobre pasadas
+    # de 790 m, el dron exterior llega a y = −99,75 m. Recortar el registro a los
+    # límites de la zona los apilaría contra el borde en el visor.
+    margen = max(formacion.frente_m, formacion.fondo_m) / 2.0 + 20.0
     registro = RegistroTrayectorias(
-        motor, [0.0, 0.0, 0.0], [ent.lado_x_m, ent.lado_y_m, ent.altura_max_m]
+        motor,
+        [-margen, -margen, 0.0],
+        [ent.lado_x_m + margen, ent.lado_y_m + margen, ent.altura_max_m],
     )
 
     # El enjambre arranca ya formado sobre el inicio de la ruta.

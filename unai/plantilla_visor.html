@@ -110,6 +110,7 @@ for(let i=0;i<crudo.length;i++){
   POS[i] = (crudo[i]+32768)/65535*ESC[eje] + MIN[eje];
 }
 const COB = D.cobertura.datos ? desdeBase64(D.cobertura.datos, Int32Array) : null;
+const COBF = D.cobertura.fraccion ? desdeBase64(D.cobertura.fraccion, Uint8Array) : null;
 const CIL = D.obstaculos.cilindros, CAJ = D.obstaculos.cajas;
 
 // --- cámara ---------------------------------------------------------------
@@ -228,7 +229,10 @@ function dibujarCobertura(marco){
   // Se agrupan las celdas en unos pocos tramos de color y se rellena cada
   // tramo de una sola vez: dibujar diez mil cuadrados por separado no daría
   // fluidez.
-  const rutas=[]; for(let k=0;k<CUBOS_COB;k++) rutas.push(new Path2D());
+  // Cada bloque se agrupa por instante de visita Y por fracción realmente
+  // cubierta, de modo que un bloque medio vacío se vea medio vacío.
+  const NIV=4;
+  const rutas=[]; for(let k=0;k<CUBOS_COB*NIV;k++) rutas.push(new Path2D());
   const maxPaso=D.cobertura.paso_max||1;
   for(let j=0;j<ny;j++){
     for(let i=0;i<nx;i++){
@@ -238,14 +242,19 @@ function dibujarCobertura(marco){
       const a=proyectar(x0,y0,0), b=proyectar(x0+cx,y0,0), c=proyectar(x0+cx,y0+cy,0), d=proyectar(x0,y0+cy,0);
       if(!a||!b||!c||!d) continue;
       const k=Math.min(CUBOS_COB-1,Math.floor(v/maxPaso*CUBOS_COB));
-      const r=rutas[k];
+      const fr=COBF?COBF[j*nx+i]/255:1;
+      const nv=Math.min(NIV-1,Math.floor(fr*NIV));
+      const r=rutas[k*NIV+nv];
       r.moveTo(a[0],a[1]);r.lineTo(b[0],b[1]);r.lineTo(c[0],c[1]);r.lineTo(d[0],d[1]);r.closePath();
     }
   }
   for(let k=0;k<CUBOS_COB;k++){
     const t=k/(CUBOS_COB-1);
-    ctx.fillStyle=`rgba(${Math.round(40+150*t)},${Math.round(130+70*t)},${Math.round(90-40*t)},0.55)`;
-    ctx.fill(rutas[k]);
+    for(let nv=0;nv<NIV;nv++){
+      const alfa=0.14+0.5*(nv+0.5)/NIV;
+      ctx.fillStyle=`rgba(${Math.round(40+150*t)},${Math.round(130+70*t)},${Math.round(90-40*t)},${alfa.toFixed(2)})`;
+      ctx.fill(rutas[k*NIV+nv]);
+    }
   }
 }
 

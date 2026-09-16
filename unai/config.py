@@ -86,6 +86,19 @@ class ConfigFormacion:
     altura_m: float | None = None
     """Altura de vuelo. Si es None se deriva de la separación (sin solape)."""
 
+    solape_fraccion: float = 0.15
+    """Solape de la huella de la cámara entre drones contiguos.
+
+    La altura a la que la huella mide exactamente la separación deja las
+    huellas **tangentes**: se tocan en un punto y no se solapan. Sobre el papel
+    eso basta para cubrirlo todo; en la práctica no deja margen ninguno, y
+    cualquier desvío de posición, deriva de viento o variación de altura abre
+    franjas sin reconocer. Medido: con tangencia exacta y las trayectorias
+    alineadas con la rejilla de medición, la cobertura cae al 72,5 %.
+
+    El mismo 10-20 % que el barrido en franjas reserva entre pasadas (`docs/02`,
+    §10) hace falta también entre drones. Con 0 se recupera la tangencia."""
+
     angulo_cuna_grados: float = 45.0
 
     FORMAS = ("linea", "rejilla", "cuna")
@@ -142,7 +155,9 @@ class ConfigEnjambre:
         """Altura efectiva: la configurada, o la que no produce solape."""
         if self.formacion.altura_m is not None:
             return self.formacion.altura_m
-        return self.dron.altura_sin_solape_m(self.formacion.separacion_max_m)
+        return self.dron.altura_sin_solape_m(self.formacion.separacion_max_m) * (
+            1.0 + self.formacion.solape_fraccion
+        )
 
 
 # --------------------------------------------------------------------------- #

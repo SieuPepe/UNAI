@@ -28,10 +28,16 @@ def test_una_clave_mal_escrita_no_pasa_en_silencio():
 
 
 def test_la_altura_se_deriva_de_la_separacion():
-    """Acople altura-separación: con 10 m de separación, la altura son 5 m."""
+    """Acople altura-separación, más el solape.
+
+    Con 10 m de separación la huella es tangente a 5 m de altura, pero la
+    tangencia no deja margen: cualquier desvío abre franjas. Se vuela un 15 %
+    más alto para que las huellas se solapen.
+    """
     cfg = Config()
-    assert cfg.enjambre.altura_vuelo_m == pytest.approx(5.0)
-    assert cfg.enjambre.dron.huella_m(5.0) == pytest.approx(10.0)
+    assert cfg.enjambre.dron.altura_sin_solape_m(10.0) == pytest.approx(5.0)
+    assert cfg.enjambre.altura_vuelo_m == pytest.approx(5.75)
+    assert cfg.enjambre.dron.huella_m(cfg.enjambre.altura_vuelo_m) == pytest.approx(11.5)
 
     cfg30 = replace(
         cfg,
@@ -39,7 +45,37 @@ def test_la_altura_se_deriva_de_la_separacion():
             cfg.enjambre, formacion=replace(cfg.enjambre.formacion, separacion_max_m=30.0)
         ),
     )
-    assert cfg30.enjambre.altura_vuelo_m == pytest.approx(15.0)
+    assert cfg30.enjambre.altura_vuelo_m == pytest.approx(17.25)
+
+
+def test_sin_solape_la_cobertura_es_de_cuchillo():
+    """La tangencia exacta depende de cómo caigan las trayectorias en la rejilla.
+
+    Es el fallo que dejaba la misión de referencia en el 95,5 %: en la pasada
+    cuyas trayectorias caían justo sobre los centros de las celdas, la fila
+    intermedia quedaba a 5,00 m exactos de dos drones, es decir en el borde de
+    ambas huellas, y no se marcaba nunca.
+    """
+    from unai.calculo import seleccionar
+    from unai.cobertura import MallaCobertura
+    from unai.config import ConfigEntorno
+
+    motor = seleccionar(False)
+    zona = ConfigEntorno(tipo="campo", lado_x_m=200.0, lado_y_m=100.0)
+
+    def barrer(radio, fase):
+        malla = MallaCobertura(zona, 2.5, radio, motor)
+        ys = np.arange(fase, 100.0, 10.0)
+        for k, x in enumerate(np.arange(0, 200, 0.3)):
+            malla.marcar(
+                np.column_stack([np.full(ys.size, x), ys, np.full(ys.size, 5.0)]), k
+            )
+        return malla.porcentaje
+
+    # Tangencia exacta: la fase alineada con la rejilla hunde la cobertura.
+    assert barrer(5.0, 1.25) < barrer(5.0, 0.25) - 15.0
+    # Con solape, la fase deja de importar.
+    assert barrer(5.75, 1.25) == pytest.approx(barrer(5.75, 0.25), abs=3.0)
 
 
 def test_avisa_si_el_radio_de_comunicacion_se_queda_corto():

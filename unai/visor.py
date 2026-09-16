@@ -21,13 +21,15 @@ _LADO_MAX_COBERTURA = 160
 _MUY_LEJANO = np.iinfo(np.int32).max
 
 
-def _reducir_cobertura(malla: np.ndarray, lado_max: int) -> tuple[np.ndarray, int, int]:
-    """Agrupa la malla de cobertura en bloques, quedándose con la visita más temprana.
+def _reducir_cobertura(malla: np.ndarray, lado_max: int):
+    """Agrupa la malla de cobertura en bloques para que el navegador pueda dibujarla.
 
-    La malla de trabajo tiene millón y medio de celdas y el navegador no puede
-    dibujar tantos cuadrados por fotograma. Se conserva el instante más
-    temprano de cada bloque, que es lo que hace falta para ver cómo se va
-    pintando el mapa.
+    De cada bloque se conservan dos cosas: el instante de la **primera** visita,
+    que es lo que permite ver cómo se va pintando el mapa, y la **fracción** de
+    celdas del bloque realmente reconocidas. Sin la fracción, un bloque con una
+    sola celda visitada de sesenta y cuatro se pintaría igual que uno completo y
+    el visor mostraría un 100 % donde la medición real dice 95 %: taparía justo
+    los huecos que interesa ver.
     """
     n_y, n_x = malla.shape
     bloque_y = max(1, int(np.ceil(n_y / lado_max)))
@@ -43,7 +45,16 @@ def _reducir_cobertura(malla: np.ndarray, lado_max: int) -> tuple[np.ndarray, in
         alto // bloque_y, bloque_y, ancho // bloque_x, bloque_x
     ).min(axis=(1, 3))
     reducida = np.where(reducida == _MUY_LEJANO, -1, reducida)
-    return reducida.astype(np.int32), bloque_x, bloque_y
+
+    visitadas = (ampliada >= 0).reshape(
+        alto // bloque_y, bloque_y, ancho // bloque_x, bloque_x
+    ).sum(axis=(1, 3))
+    dentro = np.ones_like(malla, dtype=np.int32)
+    dentro = np.pad(dentro, ((0, relleno_y), (0, relleno_x)), constant_values=0).reshape(
+        alto // bloque_y, bloque_y, ancho // bloque_x, bloque_x
+    ).sum(axis=(1, 3))
+    fraccion = np.where(dentro > 0, visitadas / np.maximum(dentro, 1) * 255.0, 0.0)
+    return reducida.astype(np.int32), fraccion.astype(np.uint8), bloque_x, bloque_y
 
 
 def _b64(datos: np.ndarray) -> str:
@@ -55,7 +66,9 @@ def construir_payload(resultado: Resultado) -> dict:
     ent, enj, sim = cfg.entorno, cfg.enjambre, cfg.simulacion
     reg = resultado.registro.a_dict()
 
-    reducida, bloque_x, bloque_y = _reducir_cobertura(resultado.cobertura, _LADO_MAX_COBERTURA)
+    reducida, fraccion, bloque_x, bloque_y = _reducir_cobertura(
+        resultado.cobertura, _LADO_MAX_COBERTURA
+    )
     n_y_red, n_x_red = reducida.shape
     paso_max = int(reducida.max()) if reducida.size and reducida.max() > 0 else 1
 
@@ -107,6 +120,7 @@ def construir_payload(resultado: Resultado) -> dict:
             "celda_y": ent.lado_y_m / max(n_y_red, 1),
             "paso_max": paso_max,
             "datos": _b64(reducida),
+            "fraccion": _b64(fraccion),
         },
         "obstaculos": {
             "cilindros": np.asarray(obst["cilindros"]).round(2).tolist(),

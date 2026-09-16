@@ -136,6 +136,41 @@ Y en los casos aislados: un dron contra un árbol de frente deja 7,4 m; contra u
 > Amplía el documento 02, §6 y §7. El campo potencial puro no basta a velocidad de crucero; hace
 > falta predicción y, sobre todo, la condición de frenado.
 
+### 1.5 La tangencia de las huellas es una cobertura de cuchillo
+
+**Síntoma.** La misión de referencia completa, con cero colisiones y la formación perfecta,
+terminaba con **95,52 % de cobertura** en vez del 100 %.
+
+**Diagnóstico.** El mapa de huecos los situó confinados a `y ∈ [1.685, 2.265] m`: exactamente la
+franja que barría **una sola** de las cuatro pasadas, aquella donde ninguna pasada vecina solapaba.
+Ni un hueco en el resto de la zona.
+
+La causa es aritmética. Con drones cada 10 m y huella de radio 5 m, las huellas quedan
+**tangentes**: se tocan en un punto. En la pasada en cuestión, las trayectorias caían sobre 1,25 m
+módulo 2,5, es decir justo sobre los centros de las celdas de medición. La fila de celdas
+intermedia entre dos drones quedaba entonces a **5,00 metros exactos** de ambos, o sea en el borde
+mismo de las dos huellas, y nunca se marcaba: una de cada cuatro filas de celdas de esa pasada.
+
+Forzando esa alineación a propósito en un caso aislado, la cobertura cae al **72,5 %** frente al
+95 % de una fase cualquiera.
+
+**Corrección.** El documento 02, §10 ya prescribía un solape del 10-20 % entre pasadas contiguas
+"para no dejar huecos por errores de posición". Lo que faltaba era aplicar el mismo criterio
+**entre drones**. La altura de vuelo derivada pasa a incluirlo:
+
+```
+altura = (separación / 2) × (1 + solape) = 5,00 × 1,15 = 5,75 m
+```
+
+Huella de 11,5 m, redundancia de 1,32. Con solape cero se recupera la tangencia, por si interesa
+estudiarla.
+
+**Lección de fondo, más allá del número.** El error no estaba en el código, que hacía exactamente
+lo prescrito; estaba en tratar una condición geométrica de borde —"las huellas se tocan"— como si
+fuera una condición de cobertura. Un borde tiene grosor cero, y nada real cae exactamente sobre él
+de forma fiable. Un diseño que depende de una igualdad exacta no es un diseño ajustado: es un
+diseño que aún no ha fallado.
+
 ---
 
 ## 2. El radio de comunicación tiene un mínimo no negociable

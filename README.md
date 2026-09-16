@@ -9,7 +9,7 @@ baja cota, en cuatro entornos distintos, con dos finalidades:
    orbitando la cámara, recorriendo la línea de tiempo y activando capas de información.
 
 **Caso de referencia:** 100 drones separados un máximo de 10 m entre sí, reconociendo 10 km² a
-5 metros de altura. Los tres parámetros son configurables.
+5,75 metros de altura. Los tres parámetros son configurables.
 
 ---
 
@@ -93,7 +93,9 @@ zona: en línea, 17 minutos; en bloque de 10 × 10, casi dos horas. Para barrer 
 frente, y la profundidad es anchura desaprovechada.
 
 **La altura de vuelo no es libre: la fija la separación.** La huella de una cámara de 90° mide el
-doble de la altura. Con drones a 10 m, la altura que no solapa son 5 m. A 50 m de altura cada
+doble de la altura, así que con drones a 10 m las huellas se tocan a 5 m de altura. Pero tocarse no
+basta: sin solape, la cobertura real se quedó en el 95,5 %, y con las trayectorias mal alineadas
+llega a caer al 72,5 %. Se vuela un 15 % más alto, a 5,75 m. A 50 m de altura, en cambio, cada
 punto lo mirarían cien drones a la vez.
 
 **El radio de comunicación tiene un mínimo.** Para que la anticolisión vea venir un cruce con el

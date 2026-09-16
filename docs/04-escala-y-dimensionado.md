@@ -67,9 +67,28 @@ A 50 m de altura, cada punto del terreno lo estarían mirando **cien drones a la
 haría cien veces el mismo trabajo. La separación de 10 m solo tiene sentido si se vuela **bajo**.
 
 ```
-altura óptima = separación / 2      (para una cámara de 90°)
-              = 10 / 2 = 5 metros
+altura de tangencia = separación / 2      (para una cámara de 90°)
+                    = 10 / 2 = 5 metros
 ```
+
+> **Corregido al medir.** Cinco metros es la altura a la que las huellas quedan **tangentes**: se
+> tocan en un punto y no se solapan. Sobre el papel eso cubre el terreno entero; en la práctica no
+> deja margen ninguno. La misión de referencia se quedó en el **95,52 %** de cobertura, con los
+> huecos confinados exactamente a la franja que barría una sola pasada. La causa: en esa pasada las
+> trayectorias caían justo sobre los centros de las celdas de medición, de modo que la fila
+> intermedia quedaba a 5,00 m exactos de dos drones —en el borde de ambas huellas— y no se marcaba
+> nunca. Forzando esa alineación a propósito, la cobertura baja al **72,5 %**.
+>
+> El documento 02, §10 ya prescribe un solape del 10-20 % entre pasadas contiguas "para no dejar
+> huecos por errores de posición". Hacía falta aplicar lo mismo **entre drones**. La altura de vuelo
+> por defecto pasa a
+>
+> ```
+> altura = (separación / 2) × (1 + solape) = 5 × 1,15 = 5,75 metros
+> ```
+>
+> con huella de 11,5 m y redundancia de 1,32. El solape es configurable, y con 0 se recupera la
+> tangencia para quien quiera estudiarla.
 
 Esto reencuadra el proyecto entero, y para bien:
 
