@@ -122,7 +122,11 @@ Al final de cada pasada hay que dar la vuelta, y con un frente de 1 km eso no es
 | Maniobra | Coste |
 |---|---:|
 | **Rotar 180° sobre el centro** — el dron exterior recorre un semicírculo de 1.555 m | 104 s |
-| **Giro en espejo** — nadie rota: cada dron invierte su rumbo y se desplaza lateralmente | **66 s** |
+| **Giro en espejo** — nadie rota: cada dron invierte su rumbo y se desplaza lateralmente | **53 s** |
+
+*(El giro en espejo resultó costar 52,7 s y no los 66 estimados aquí en un principio: el
+desplazamiento lateral es el paso entre pasadas, 790 m, no el frente completo de 990 m, porque las
+pasadas se reparten por igual sobre el lado de la zona.)*
 
 El giro en espejo es más rápido y, sobre todo, **no exige que el dron exterior vuele a tope
 mientras el interior casi se para**, que es el problema real de rotar una formación ancha. Como el
@@ -265,11 +269,15 @@ cálculo, que sigue siendo perfectamente asumible a 100 drones (§9).
 
 ## 9. Lo que no cambia
 
-**Sigue sin hacer falta rejilla espacial.** Una matriz de distancias de 100 × 100 son 10.000
-números que NumPy calcula de golpe. Que ahora los drones estén juntos en lugar de dispersos no
-altera el coste: la matriz es la misma. A 50 Hz y 20 minutos son 60.000 pasos, que siguen
-resolviéndose en segundos. La rejilla sigue siendo la respuesta correcta a partir de ~500 drones,
-y no antes.
+**Sigue sin hacer falta rejilla espacial a 100 drones.** Una matriz de distancias de 100 × 100 son
+10.000 números que NumPy calcula de golpe. Que los drones estén juntos en lugar de dispersos no
+altera el coste: la matriz es la misma.
+
+> **Corregido con medidas.** Este documento situaba en unos 500 drones el umbral a partir del cual
+> haría falta la rejilla. Medido con `unai banco`: 100 drones cuestan 3,2 ms por paso, 200 cuestan
+> 15,7 y 400 cuestan 70,4. El coste es cuadrático con un extra por dejar de caber en caché, así que
+> el umbral real está en torno a **250 drones**, no 500. Ver
+> [`05-hallazgos-de-implementacion.md`](05-hallazgos-de-implementacion.md), §4.
 
 **El tamaño del resultado sigue siendo cómodo.** Registro a 5 Hz con enteros de 16 bits:
 

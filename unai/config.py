@@ -301,6 +301,12 @@ class ConfigComportamiento:
     cohesion_holgura: float = 1.0
     """Margen sobre `d_max` antes de que tire la fuerza de cohesión."""
 
+    ruta_a_curva_fraccion: float = 0.5
+    """Parte de la aceleración máxima que el guía reserva para doblar la esquina.
+
+    Con la ruta de barrido tomada en seco, el enjambre se pasa de largo en cada
+    giro: el error de formación salta de 0,01 m en recta a 16 m en el vértice."""
+
     bloqueo_umbral_ms: float = 0.5
     bloqueo_segundos: float = 3.0
     """Un dron por debajo del umbral durante este tiempo se considera bloqueado."""
@@ -420,7 +426,11 @@ class Config:
             datos = yaml.safe_load(texto)
         else:
             datos = json.loads(texto)
-        return cls.desde_dict(datos or {})
+        datos = datos or {}
+        # Las descripciones de los ficheros de `configs/` son para quien lee,
+        # no parámetros: se retiran antes de construir.
+        datos = {k: v for k, v in datos.items() if not k.startswith("_")}
+        return cls.desde_dict(datos)
 
 
 def _construir(cls: type, datos: dict[str, Any]) -> Any:

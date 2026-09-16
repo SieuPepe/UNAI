@@ -62,7 +62,10 @@ def simular(
     )
     viento = Viento(ent.viento, motor, sim.semilla)
     formacion = Formacion(enj.formacion, enj.n_drones, altura, motor)
-    ruta = RutaBarrido(ent, formacion, huella, enj.v_crucero_ms)
+    ruta = RutaBarrido(
+        ent, formacion, huella, enj.v_crucero_ms,
+        a_curva=cfg.comportamiento.ruta_a_curva_fraccion * enj.dron.a_max_ms2,
+    )
     malla = MallaCobertura(ent, sim.celda_cobertura_m, huella / 2.0, motor)
     modelo = ModeloCinematico(enj.dron, motor)
     comp = Comportamientos(cfg.comportamiento, enj, motor)

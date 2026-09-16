@@ -37,8 +37,12 @@ class RutaBarrido:
         huella_m: float,
         v_crucero: float,
         tolerancia_retraso_m: float | None = None,
+        a_curva: float = 4.9,
+        v_min_giro: float = 1.0,
     ):
         self.v_crucero = float(v_crucero)
+        self.a_curva = float(a_curva)
+        self.v_min_giro = float(v_min_giro)
         self.altura = formacion.altura_m
         self.ancho_pasada = formacion.frente_m + huella_m
         self.tolerancia = tolerancia_retraso_m or max(3.0 * huella_m, 15.0)
@@ -100,6 +104,13 @@ class RutaBarrido:
         """Adelanta el guía, frenando en proporción al retraso del enjambre."""
         freno = max(0.0, 1.0 - max(0.0, retraso_m) / self.tolerancia)
         rapidez = self.v_crucero * freno
+
+        # Frenada antes de la esquina, por el mismo principio de distancia de
+        # frenado que emplea la evitación de obstáculos. Sin ella el guía toma
+        # el giro en seco y el enjambre se pasa de largo: revertir 15 m/s con
+        # 9,81 m/s² cuesta v²/2a = 11,5 metros como mínimo físico, y el error
+        # de formación saltaba de 0,01 m en recta a 16 m en cada giro.
+        rapidez = min(rapidez, self._limite_por_curva())
         self._s = min(self._s + rapidez * dt, self.longitud_total)
 
         i = int(np.searchsorted(self.acumulado, min(self._s, self.longitud_total), side="right") - 1)
@@ -110,6 +121,16 @@ class RutaBarrido:
             self._velocidad = np.array([tramo[0], tramo[1], 0.0]) / largo * rapidez
         if abs(tramo[0]) > 1e-9:
             self._sentido = math.copysign(1.0, tramo[0])
+
+    def _limite_por_curva(self) -> float:
+        """Velocidad máxima compatible con detenerse en el próximo vértice."""
+        s = min(self._s, self.longitud_total)
+        i = int(np.searchsorted(self.acumulado, s, side="right") - 1)
+        i = max(0, min(i, len(self.longitud_tramo) - 1))
+        if i >= len(self.longitud_tramo) - 1:
+            return self.v_crucero          # último tramo: no hay esquina que doblar
+        restante = max(self.acumulado[i + 1] - s, 0.0)
+        return max(self.v_min_giro, math.sqrt(2.0 * self.a_curva * restante))
 
     def velocidad_guia(self) -> np.ndarray:
         """Velocidad actual del puesto, para que el dron la anticipe.
