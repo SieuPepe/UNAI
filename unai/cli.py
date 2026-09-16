@@ -11,11 +11,13 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import statistics
 import sys
 import time
 import warnings
 import webbrowser
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
@@ -79,6 +81,8 @@ def _aplicar(cfg: Config, args: argparse.Namespace) -> Config:
         cambios_sim["dt_s"] = args.dt
     if args.gpu:
         cambios_sim["usar_gpu"] = True
+    if args.hilos is not None:
+        cambios_sim["hilos"] = args.hilos
     if cambios_sim:
         sim = replace(sim, **cambios_sim)
 
@@ -110,6 +114,8 @@ def _opciones_comunes(p: argparse.ArgumentParser) -> None:
     p.add_argument("--dt", type=float, help="paso de integración, en segundos")
     p.add_argument("--semilla", type=int)
     p.add_argument("--gpu", action="store_true", help="usar GPU si la hay (ver docs/01, §5.1)")
+    p.add_argument("--hilos", type=int,
+                   help="hilos con que repartir cada paso; 0 = automático según núcleos")
 
 
 def _guardar(resultado, destino: Path) -> Path:
@@ -139,7 +145,8 @@ def _guardar(resultado, destino: Path) -> Path:
 
 def _imprimir(resultado) -> None:
     r, i = resultado.resumen, resultado.info
-    print(f"\n  Dispositivo      {i['dispositivo']} ({i['dispositivo_detalle']})")
+    print(f"\n  Dispositivo      {i['dispositivo']} ({i['dispositivo_detalle']}), "
+          f"{i['hilos']} hilo{'s' if i['hilos'] != 1 else ''}")
     print(f"  Cálculo          {i['segundos_de_reloj']} s de reloj, "
           f"{i['ms_por_paso']} ms/paso, ×{i['veces_tiempo_real']} el tiempo real")
     print(f"  Formación        frente {i['frente_formacion_m']} m, "
@@ -181,6 +188,8 @@ def orden_estimar(args: argparse.Namespace) -> int:
         ("ancho_pasada_m", "Ancho de pasada (m)"), ("pasadas", "Pasadas"),
         ("tiempo_ideal_texto", "Duración ideal"), ("visor_mb", "Tamaño del visor (MB)"),
         ("reloj_estimado_texto", "Cálculo estimado"),
+        ("hilos", "Hilos que se usarán"),
+        ("nucleos", "Núcleos de esta máquina"),
     ]:
         print(f"    {etiqueta:<26} {datos[clave]}")
     for aviso in datos["avisos"]:
@@ -222,6 +231,30 @@ def orden_simular(args: argparse.Namespace) -> int:
     return 0
 
 
+def _una_ejecucion(cfg: Config) -> dict:
+    """Una simulación del lote. Debe estar a nivel de módulo para poder repartirse
+    entre procesos: lo que se manda a un proceso hijo hay que poder serializarlo.
+
+    Solo vuelve el resumen, no el resultado entero: devolver las trayectorias
+    obligaría a serializar megas de matrices por cada simulación.
+    """
+    from .simulacion import simular
+
+    r = simular(cfg)
+    return {
+        "semilla": cfg.simulacion.semilla,
+        "cobertura_pct": r.resumen["eficacia"]["cobertura_final_pct"],
+        "tiempo_s": r.resumen["eficacia"]["tiempo_mision_s"],
+        "colisiones_drones": r.resumen["seguridad"]["colisiones_entre_drones"],
+        "colisiones_entorno": r.resumen["seguridad"]["colisiones_con_entorno"],
+        "separacion_minima_m": r.resumen["seguridad"]["separacion_minima_m"],
+        "margen_p5_m": r.resumen["seguridad"]["margen_seguridad_p5_m"],
+        "energia_wh": r.resumen["coste"]["energia_total_wh"],
+        "error_formacion_m": r.resumen["formacion"]["error_medio_al_puesto_m"],
+        "bloqueado_s": r.resumen["formacion"]["tiempo_bloqueado_medio_s"],
+    }
+
+
 def orden_lote(args: argparse.Namespace) -> int:
     """Repite una configuración con varias semillas y resume la dispersión.
 
@@ -232,29 +265,44 @@ def orden_lote(args: argparse.Namespace) -> int:
     from .simulacion import simular
 
     cfg = _cargar(args)
-    filas = []
+    procesos = args.procesos if args.procesos > 0 else (os.cpu_count() or 1)
+    procesos = max(1, min(procesos, args.semillas))
+
+    configuraciones = []
     for k in range(args.semillas):
         semilla = (args.semilla or 0) + k
-        actual = replace(
-            cfg,
-            entorno=replace(cfg.entorno, semilla=semilla),
-            simulacion=replace(cfg.simulacion, semilla=semilla),
+        # Cada proceso usa un solo hilo: repartir además por dentro solo haría
+        # que los procesos se peleasen por los mismos núcleos.
+        simulacion = replace(cfg.simulacion, semilla=semilla)
+        if procesos > 1 and cfg.simulacion.hilos == 0:
+            simulacion = replace(simulacion, hilos=1)
+        configuraciones.append(
+            replace(
+                cfg,
+                entorno=replace(cfg.entorno, semilla=semilla),
+                simulacion=simulacion,
+            )
         )
-        print(f"  semilla {semilla} ({k + 1}/{args.semillas})...", end=" ", flush=True)
-        r = simular(actual)
-        filas.append({
-            "semilla": semilla,
-            "cobertura_pct": r.resumen["eficacia"]["cobertura_final_pct"],
-            "tiempo_s": r.resumen["eficacia"]["tiempo_mision_s"],
-            "colisiones_drones": r.resumen["seguridad"]["colisiones_entre_drones"],
-            "colisiones_entorno": r.resumen["seguridad"]["colisiones_con_entorno"],
-            "separacion_minima_m": r.resumen["seguridad"]["separacion_minima_m"],
-            "margen_p5_m": r.resumen["seguridad"]["margen_seguridad_p5_m"],
-            "energia_wh": r.resumen["coste"]["energia_total_wh"],
-            "error_formacion_m": r.resumen["formacion"]["error_medio_al_puesto_m"],
-            "bloqueado_s": r.resumen["formacion"]["tiempo_bloqueado_medio_s"],
-        })
-        print(f"cobertura {filas[-1]['cobertura_pct']:.1f} %")
+
+    inicio = time.perf_counter()
+    filas = []
+    if procesos == 1:
+        for k, actual in enumerate(configuraciones):
+            print(f"  semilla {actual.simulacion.semilla} ({k + 1}/{args.semillas})...",
+                  end=" ", flush=True)
+            filas.append(_una_ejecucion(actual))
+            print(f"cobertura {filas[-1]['cobertura_pct']:.1f} %")
+    else:
+        print(f"  {args.semillas} simulaciones repartidas entre {procesos} procesos "
+              f"({os.cpu_count()} núcleos disponibles)...")
+        with ProcessPoolExecutor(procesos) as ejecutor:
+            for k, fila in enumerate(ejecutor.map(_una_ejecucion, configuraciones), 1):
+                filas.append(fila)
+                print(f"    semilla {fila['semilla']} ({k}/{args.semillas}): "
+                      f"cobertura {fila['cobertura_pct']:.1f} %")
+    transcurrido = time.perf_counter() - inicio
+    print(f"\n  {args.semillas} simulaciones en {transcurrido:.1f} s "
+          f"({transcurrido / args.semillas:.1f} s por simulación)")
 
     destino = Path(args.salida) / f"lote-{cfg.nombre}-{time.strftime('%Y%m%d-%H%M%S')}"
     destino.mkdir(parents=True, exist_ok=True)
@@ -283,9 +331,13 @@ def _cuartiles(valores: list[float]) -> tuple[float, float]:
 
 
 def orden_banco(args: argparse.Namespace) -> int:
-    from .banco import ejecutar
+    from .banco import ejecutar, ejecutar_hilos
 
-    ejecutar([int(v) for v in args.drones_lista.split(",")], args.pasos)
+    tamanos = [int(v) for v in args.drones_lista.split(",")]
+    if args.hilos:
+        ejecutar_hilos(tamanos, args.pasos)
+    else:
+        ejecutar(tamanos, args.pasos)
     return 0
 
 
@@ -325,11 +377,15 @@ def principal(argv: list[str] | None = None) -> int:
     _opciones_comunes(p)
     p.add_argument("--semillas", type=int, default=20)
     p.add_argument("--salida", default="resultados")
+    p.add_argument("--procesos", type=int, default=0,
+                   help="simulaciones simultáneas; 0 = un proceso por núcleo, 1 = sin paralelizar")
     p.set_defaults(funcion=orden_lote)
 
     p = ordenes.add_parser("banco", help="mide CPU frente a GPU y busca el punto de cruce")
     p.add_argument("--drones-lista", default="50,100,500,2000")
     p.add_argument("--pasos", type=int, default=200)
+    p.add_argument("--hilos", action="store_true",
+                   help="medir el reparto entre hilos en vez de CPU frente a GPU")
     p.set_defaults(funcion=orden_banco)
 
     p = ordenes.add_parser("ventana", help="abre la ventana de lanzamiento")

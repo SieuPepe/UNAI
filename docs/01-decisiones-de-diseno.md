@@ -151,6 +151,7 @@ Cada entorno se define en un fichero de configuración legible, con semilla alea
 | Resultados | Fichero de trayectorias + métricas | Auditable y reutilizable sin volver a simular. |
 | Visor | HTML + Three.js, fichero único | Se abre con doble clic: sin servidor, sin instalación, sin internet. |
 | Análisis comparativo | Python (tablas + gráficas) | Comparar decenas de ejecuciones de una tacada. |
+| Paralelismo | Hilos dentro del paso, procesos entre simulaciones | Aprovechar todos los núcleos sin alterar el resultado. |
 
 **Requisito para el usuario:** tener Python 3 instalado. El visor no requiere nada.
 
@@ -196,6 +197,36 @@ máquina.
 
 Si se marca la casilla y no hay GPU utilizable, se **avisa de forma visible** y se continúa en CPU.
 Un respaldo silencioso haría que una comparación de rendimiento mintiera sin que nadie se enterase.
+
+### Multinúcleo y multihilo — CERRADO
+
+El cálculo aprovecha varios núcleos por **dos vías distintas**, que sirven para cosas distintas y
+no compiten entre sí.
+
+**Dentro de un paso: reparto entre hilos.** Los pasos de tiempo son estrictamente secuenciales —el
+instante siguiente depende del anterior— así que el tiempo no se puede paralelizar. Lo que sí se
+puede es repartir el trabajo *dentro* de cada paso: el grueso es la matriz de todos los pares de
+drones, y se parte por filas, de modo que cada hilo se ocupa de unos cuantos drones. NumPy suelta
+el bloqueo global del intérprete mientras opera sobre matrices, así que los hilos avanzan de verdad
+en paralelo sin necesidad de procesos.
+
+El reparto es **exacto**: cada dron se calcula con las mismas operaciones y en el mismo orden, y los
+bloques solo se concatenan, así que la simulación sale idéntica bit a bit. La reproducibilidad, que
+es el principio 1 de §6, no se resiente.
+
+**Entre simulaciones: reparto entre procesos.** Comparar configuraciones exige repetir la misma
+misión con veinte semillas distintas, y esas veinte son independientes: es paralelismo perfecto.
+`unai lote --procesos N` las reparte entre procesos, uno por núcleo por omisión. Aquí sí hacen falta
+procesos y no hilos, porque el bucle de simulación es código Python y el bloqueo global del
+intérprete lo serializaría.
+
+Cuando se usan varios procesos, cada uno se limita a un hilo: repartir además por dentro solo haría
+que los procesos se peleasen por los mismos núcleos.
+
+**Cuántos hilos.** El número por omisión se deduce de los núcleos de la máquina y del tamaño del
+enjambre, porque repartir enjambres pequeños cuesta más de lo que ahorra. El óptimo depende de la
+máquina, así que **se mide, no se supone**: `unai banco --hilos` lo determina, y `--hilos N` lo
+fija.
 
 ---
 

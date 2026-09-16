@@ -68,7 +68,7 @@ def simular(
     )
     malla = MallaCobertura(ent, sim.celda_cobertura_m, huella / 2.0, motor)
     modelo = ModeloCinematico(enj.dron, motor)
-    comp = Comportamientos(cfg.comportamiento, enj, motor)
+    comp = Comportamientos(cfg.comportamiento, enj, motor, sim.hilos)
     metricas = Metricas(cfg, motor)
     # La brocha es más ancha que el paso entre pasadas, así que los drones de
     # los extremos vuelan fuera de la zona: con un frente de 990 m sobre pasadas
@@ -104,7 +104,9 @@ def simular(
         velocidad_suelo = velocidad_aire + aire
 
         cercanos = campo.consultar(posicion)
-        vecinos = comp.vecinos(posicion)
+        a_anti, a_sep, a_coh, distancia_vecino, _ = comp.fuerzas_de_pares(
+            posicion, velocidad_suelo
+        )
         puestos = formacion.en_mundo(ruta.guia(), ruta.sentido)
         error_puesto = xp.linalg.norm(puestos - posicion, axis=1)
 
@@ -113,9 +115,9 @@ def simular(
                 posicion, velocidad_suelo, puestos, v_max, ruta.velocidad_guia()
             ),
             comp.evitar_obstaculos(velocidad_suelo, cercanos),
-            comp.anticolision(posicion, velocidad_suelo, vecinos),
-            comp.separacion(vecinos),
-            comp.cohesion(posicion, vecinos),
+            a_anti,
+            a_sep,
+            a_coh,
         )
 
         posicion, velocidad_aire = modelo.avanzar(
@@ -139,7 +141,7 @@ def simular(
         )
 
         metricas.paso(
-            vecinos.distancia_minima, choque_entorno, error_puesto,
+            distancia_vecino, choque_entorno, error_puesto,
             velocidad_aire, velocidad_suelo,
         )
         malla.marcar(posicion, paso)
@@ -156,6 +158,7 @@ def simular(
             break
 
     motor.sincronizar()
+    comp.cerrar()
     segundos_reloj = time.perf_counter() - reloj
 
     if paso % cada != 0:
@@ -178,6 +181,7 @@ def simular(
         obstaculos=_muestra_obstaculos(campo, motor, sim.max_obstaculos_visor),
         info={
             "dispositivo": motor.nombre,
+            "hilos": comp.hilos,
             "dispositivo_detalle": motor.descripcion,
             "gpu_solicitada": sim.usar_gpu,
             "segundos_de_reloj": round(segundos_reloj, 2),

@@ -11,6 +11,7 @@ No simula nada: son cuentas de servilleta, las mismas del `docs/04`.
 from __future__ import annotations
 
 import math
+import os
 
 from .config import Config
 
@@ -23,6 +24,11 @@ _MS_FIJO = 0.25
 _MS_POR_CIEN = 3.0
 _EXPONENTE = 2.2
 _DRONES_REFERENCIA = 100
+
+# Rendimiento del reparto entre hilos. Medido entre 1,24x con 2 hilos y 2,20x
+# con 8 sobre 4 núcleos: en torno a la mitad del ideal, porque parte del paso
+# no se reparte (obstáculos, cobertura, integración).
+_EFICIENCIA_HILOS = 0.45
 
 
 def resumen_previo(cfg: Config) -> dict:
@@ -58,7 +64,18 @@ def resumen_previo(cfg: Config) -> dict:
     celdas = math.ceil(ent.lado_x_m / sim.celda_cobertura_m) * math.ceil(
         ent.lado_y_m / sim.celda_cobertura_m
     )
+    from .comportamientos import _DRONES_POR_HILO, _MINIMO_PARA_REPARTIR
+
     ms_paso = _MS_FIJO + _MS_POR_CIEN * (n / _DRONES_REFERENCIA) ** _EXPONENTE
+    if sim.usar_gpu:
+        hilos = 1
+    elif n < _MINIMO_PARA_REPARTIR:
+        hilos = 1
+    else:
+        hilos = max(1, min(os.cpu_count() or 1, n // _DRONES_POR_HILO))
+    if sim.hilos > 0:
+        hilos = min(sim.hilos, n)
+    ms_paso /= 1.0 + (hilos - 1) * _EFICIENCIA_HILOS
     reloj = duracion / sim.dt_s * ms_paso / 1000.0
 
     return {
@@ -79,6 +96,8 @@ def resumen_previo(cfg: Config) -> dict:
         "reloj_estimado_s": round(reloj, 0),
         "reloj_estimado_texto": _duracion(reloj),
         "r_com_minimo_m": round(2.0 * dron.v_max_horizontal_ms * comp.anti_horizonte_s, 0),
+        "hilos": hilos,
+        "nucleos": os.cpu_count() or 1,
         "avisos": _avisos(cfg, redundancia, altura),
     }
 

@@ -37,6 +37,7 @@ _DERIVADAS = [
     ("tiempo_ideal_texto", "Duración ideal", ""),
     ("visor_mb", "Tamaño del visor", "MB"),
     ("reloj_estimado_texto", "Cálculo estimado", ""),
+    ("hilos", "Hilos que se usarán", ""),
 ]
 
 

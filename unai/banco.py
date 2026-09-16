@@ -13,6 +13,7 @@ son lo bastante grandes, ese peaje domina.
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import replace
 
@@ -25,7 +26,9 @@ from .entorno import construir
 from .vuelo import ModeloCinematico
 
 
-def medir(n_drones: int, motor: Motor, pasos: int = 200, entorno: str = "campo") -> float:
+def medir(
+    n_drones: int, motor: Motor, pasos: int = 200, entorno: str = "campo", hilos: int = 0
+) -> float:
     """Milisegundos por paso, ya descontado el calentamiento."""
     cfg = Config()
     cfg = replace(
@@ -38,7 +41,7 @@ def medir(n_drones: int, motor: Motor, pasos: int = 200, entorno: str = "campo")
     )
     xp = motor.xp
     campo = construir(cfg.entorno, cfg.comportamiento.obst_radio_influencia_m, motor=motor)
-    comp = Comportamientos(cfg.comportamiento, cfg.enjambre, motor)
+    comp = Comportamientos(cfg.comportamiento, cfg.enjambre, motor, hilos)
     modelo = ModeloCinematico(cfg.enjambre.dron, motor)
 
     azar = np.random.default_rng(0)
@@ -55,13 +58,13 @@ def medir(n_drones: int, motor: Motor, pasos: int = 200, entorno: str = "campo")
 
     def un_paso():
         cercanos = campo.consultar(posicion)
-        vecinos = comp.vecinos(posicion)
+        a_anti, a_sep, a_coh, _, _ = comp.fuerzas_de_pares(posicion, velocidad)
         a = comp.total(
             comp.hacia_puesto(posicion, velocidad, puestos, 15.0),
             comp.evitar_obstaculos(velocidad, cercanos),
-            comp.anticolision(posicion, velocidad, vecinos),
-            comp.separacion(vecinos),
-            comp.cohesion(posicion, vecinos),
+            a_anti,
+            a_sep,
+            a_coh,
         )
         return modelo.avanzar(posicion, velocidad, a, viento, 0.02)
 
@@ -73,7 +76,53 @@ def medir(n_drones: int, motor: Motor, pasos: int = 200, entorno: str = "campo")
     for _ in range(pasos):
         un_paso()
     motor.sincronizar()
-    return (time.perf_counter() - inicio) / pasos * 1000.0
+    transcurrido = (time.perf_counter() - inicio) / pasos * 1000.0
+    comp.cerrar()
+    return transcurrido
+
+
+def ejecutar_hilos(tamanos: list[int], pasos: int = 200) -> list[dict]:
+    """Busca cuántos hilos convienen en esta máquina, para cada tamaño de enjambre.
+
+    El reparto es exacto —cada dron se calcula igual y en el mismo orden— así
+    que solo cambia el tiempo, nunca el resultado. Lo que sí cambia de una
+    máquina a otra es el número de hilos que compensa, y por eso se mide en vez
+    de suponerse.
+    """
+    nucleos = os.cpu_count() or 1
+    motor = seleccionar(False)
+    candidatos = sorted({1, 2, 4, 8, 16, nucleos, nucleos * 2})
+    candidatos = [h for h in candidatos if h <= max(nucleos * 2, 2)]
+
+    print(f"\n  {motor.descripcion} · {nucleos} núcleos lógicos")
+    print(f"  Se mide el paso completo de simulación, {pasos} repeticiones.\n")
+    cabecera = f"  {'drones':>8}" + "".join(f"{str(h) + ' hilo' + ('s' if h > 1 else ''):>11}" for h in candidatos)
+    print(cabecera + f"{'mejor':>10}{'ganancia':>10}")
+    print("  " + "-" * (len(cabecera) + 18))
+
+    filas = []
+    for n in tamanos:
+        tiempos = {}
+        for h in candidatos:
+            if h > n:
+                tiempos[h] = float("nan")
+                continue
+            tiempos[h] = medir(n, motor, pasos, hilos=h)
+        validos = {h: v for h, v in tiempos.items() if v == v}
+        mejor = min(validos, key=validos.get)
+        linea = f"  {n:>8}" + "".join(
+            (f"{tiempos[h]:>10.2f}m" if tiempos[h] == tiempos[h] else f"{'—':>11}")
+            for h in candidatos
+        )
+        print(linea + f"{mejor:>10}{validos[1] / validos[mejor]:>9.2f}×")
+        filas.append({"drones": n, "mejor_hilos": mejor, **tiempos})
+
+    print(
+        "\n  El reparto no altera el resultado: cada dron se calcula con las mismas\n"
+        "  operaciones y en el mismo orden, así que la simulación sale idéntica bit a bit.\n"
+        "  Para fijar un valor: python -m unai simular --hilos N\n"
+    )
+    return filas
 
 
 def ejecutar(tamanos: list[int], pasos: int = 200) -> list[dict]:

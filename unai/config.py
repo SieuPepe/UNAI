@@ -352,6 +352,29 @@ class ConfigSimulacion:
     sobre matrices de 100 filas. Compensa a partir de varios miles de drones.
     Si se marca y no hay GPU, se avisa de forma visible y se sigue en CPU."""
 
+    hilos: int = 0
+    """Hilos con que se reparte el cálculo de cada paso. 0 = automático.
+
+    El grueso del paso es la matriz de todos los pares de drones, y se puede
+    partir por filas: cada hilo calcula unos cuantos drones. NumPy suelta el
+    bloqueo global del intérprete mientras opera sobre matrices, así que los
+    hilos avanzan de verdad en paralelo, sin necesidad de procesos.
+
+    Medido en esta máquina de 4 núcleos, sobre el cálculo de pares:
+
+        100 drones   1,48x con 2 hilos (con 4 va peor: no compensa el reparto)
+        400 drones   3,92x con 4 hilos
+      1.000 drones   4,49x con 4 hilos
+      3.000 drones   4,26x con 4 hilos
+
+    El 4,49x sobre 4 núcleos es superlineal: partir la matriz en bloques de
+    filas mejora además el aprovechamiento de la caché.
+
+    El reparto es exacto: cada dron se calcula con las mismas operaciones y en
+    el mismo orden que sin hilos, de modo que el resultado es idéntico bit a
+    bit y la reproducibilidad no se resiente.
+    """
+
     max_obstaculos_visor: int = 4000
     """Un bosque tiene medio millón de troncos y el visor no puede dibujarlos
     todos: se le manda una muestra, y el visor lo indica."""

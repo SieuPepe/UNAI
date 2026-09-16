@@ -14,7 +14,9 @@ sí toca la rejilla.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 
 from .calculo import Motor
 from .config import ConfigComportamiento, ConfigEnjambre
@@ -23,17 +25,40 @@ from .entorno import Vecindad
 
 @dataclass
 class VecindadDrones:
-    """Relaciones entre drones dentro del radio de comunicación."""
+    """Relaciones entre drones dentro del radio de comunicación.
+
+    Puede cubrir el enjambre entero o solo un bloque de filas, para poder
+    repartir el cálculo entre varios hilos (§ `fuerzas_de_pares`).
+    """
 
     diferencia: object
-    """(N, N, 3): posición del vecino j vista desde el dron i."""
+    """(m, N, 3): posición del vecino j vista desde el dron i de este bloque."""
 
     distancia: object
     visible: object
-    """(N, N): cierto si j está dentro del radio de comunicación de i."""
+    """(m, N): cierto si j está dentro del radio de comunicación de i."""
 
     n_vecinos: object
     distancia_minima: object
+    filas: slice = field(default_factory=lambda: slice(None))
+    """Qué drones son las filas de estas matrices. Por omisión, todos."""
+
+
+# Por debajo de este tamaño de enjambre no se reparte: el coste de despachar
+# el trabajo se come la ganancia.
+_MINIMO_PARA_REPARTIR = 100
+
+# Drones que debe llevar cada hilo. Medido con `unai banco --hilos` en una
+# máquina de 4 núcleos, sobre el paso completo de simulación:
+#
+#     100 drones   1,24x con 2 hilos   (con 4 va peor: 4,77 ms frente a 2,99)
+#     300 drones   1,86x con 2 hilos
+#     600 drones   2,20x con 8 hilos
+#
+# Cincuenta drones por hilo captura casi toda la ganancia sin sobrepartir los
+# enjambres pequeños. El óptimo varía con la máquina; `unai banco --hilos` lo
+# mide y `--hilos N` lo fija.
+_DRONES_POR_HILO = 50
 
 
 def _norma(xp, v):
@@ -49,25 +74,74 @@ def _norma(xp, v):
 class Comportamientos:
     """Calcula la aceleración total que pide cada dron en un instante."""
 
-    def __init__(self, comp: ConfigComportamiento, enjambre: ConfigEnjambre, motor: Motor):
+    def __init__(
+        self,
+        comp: ConfigComportamiento,
+        enjambre: ConfigEnjambre,
+        motor: Motor,
+        hilos: int = 0,
+    ):
         self.cfg = comp
         self.enjambre = enjambre
         self.motor = motor
         self.xp = motor.xp
         self._infinito = float("inf")
+        self.hilos = self._resolver_hilos(hilos)
+        # El grupo de hilos se crea una sola vez: montarlo en cada paso
+        # costaría más que el trabajo que reparte.
+        self._ejecutor = ThreadPoolExecutor(self.hilos) if self.hilos > 1 else None
+
+    def _resolver_hilos(self, hilos: int) -> int:
+        """Traduce 0 (automático) a un número de hilos sensato.
+
+        Con enjambres pequeños el reparto cuesta más de lo que ahorra: repartir
+        una matriz de 100x100 entre cuatro hilos sale más lento que calcularla
+        de una vez. En GPU no se reparte nunca: el propio dispositivo ya
+        paraleliza, y los hilos de Python solo añadirían sincronizaciones.
+        """
+        if self.motor.es_gpu:
+            return 1
+        n = self.enjambre.n_drones
+        if hilos > 0:
+            return min(hilos, max(n, 1))
+        if n < _MINIMO_PARA_REPARTIR:
+            return 1
+        # Se usan todos los núcleos de la máquina, pero solo mientras haya
+        # trabajo bastante para cada uno: no tiene sentido repartir 200 drones
+        # entre dieciséis hilos. El reparto ideal depende de la máquina, así
+        # que esto es una heurística razonable; `unai banco --hilos` mide el
+        # óptimo real y entonces se puede fijar a mano con `hilos`.
+        nucleos = os.cpu_count() or 1
+        return max(1, min(nucleos, n // _DRONES_POR_HILO))
+
+    def cerrar(self) -> None:
+        if self._ejecutor is not None:
+            self._ejecutor.shutdown(wait=False)
+            self._ejecutor = None
 
     # -- vecindad ----------------------------------------------------------- #
 
-    def vecinos(self, posiciones, activo=None) -> VecindadDrones:
+    def vecinos(self, posiciones, activo=None, filas: slice | None = None) -> VecindadDrones:
+        """Matriz de distancias entre drones, entera o de un bloque de filas."""
         xp = self.xp
         n = posiciones.shape[0]
-        diferencia = posiciones[None, :, :] - posiciones[:, None, :]
+        filas = filas or slice(None)
+        propias = posiciones[filas]
+        m = propias.shape[0]
+
+        diferencia = posiciones[None, :, :] - propias[:, None, :]
         distancia = _norma(xp, diferencia)
 
-        propio = xp.eye(n, dtype=bool)
+        # Un dron no es vecino de sí mismo. Con bloques de filas, la diagonal
+        # no está en la diagonal de la submatriz: hay que localizarla.
+        inicio = 0 if filas.start is None else filas.start
+        propio = xp.zeros((m, n), dtype=bool)
+        indices = xp.arange(m)
+        propio[indices, indices + inicio] = True
+
         visible = (distancia <= self.enjambre.r_com_m) & ~propio
         if activo is not None:
-            visible = visible & activo[None, :] & activo[:, None]
+            visible = visible & activo[None, :] & activo[filas][:, None]
 
         distancia_enmascarada = xp.where(visible, distancia, self._infinito)
         return VecindadDrones(
@@ -76,6 +150,7 @@ class Comportamientos:
             visible=visible,
             n_vecinos=visible.sum(axis=1),
             distancia_minima=distancia_enmascarada.min(axis=1),
+            filas=filas,
         )
 
     # -- comportamientos ---------------------------------------------------- #
@@ -197,7 +272,7 @@ class Comportamientos:
         """
         xp = self.xp
         r = vecindad.diferencia
-        w = velocidad_suelo[None, :, :] - velocidad_suelo[:, None, :]
+        w = velocidad_suelo[None, :, :] - velocidad_suelo[vecindad.filas][:, None, :]
 
         w2 = (w * w).sum(axis=-1)
         rw = (r * w).sum(axis=-1)
@@ -288,6 +363,45 @@ class Comportamientos:
         # encarga el puesto asignado.
         aplicable = desgajado & (vecindad.n_vecinos > 0)
         return xp.where(aplicable[:, None], direccion * exceso[:, None], 0.0)
+
+    # -- reparto entre hilos -------------------------------------------------- #
+
+    def fuerzas_de_pares(self, posiciones, velocidad_suelo, activo=None):
+        """Las tres fuerzas que dependen de los vecinos, más lo que se mide de ellos.
+
+        Devuelve `(anticolisión, separación, cohesión, distancia al vecino más
+        cercano, número de vecinos)`. Si hay más de un hilo, cada uno se ocupa
+        de un bloque de drones; el resultado es el mismo bit a bit, porque cada
+        dron se calcula igual y los bloques solo se concatenan.
+
+        Repartir por filas reduce además la memoria de trabajo: en vez de tres
+        matrices de N×N×3 a la vez, cada hilo maneja las suyas de bloque×N×3.
+        """
+        n = posiciones.shape[0]
+        if self._ejecutor is None or n < self.hilos:
+            return self._bloque(posiciones, velocidad_suelo, activo, slice(None))
+
+        cortes = [round(k * n / self.hilos) for k in range(self.hilos + 1)]
+        partes = list(
+            self._ejecutor.map(
+                lambda k: self._bloque(
+                    posiciones, velocidad_suelo, activo, slice(cortes[k], cortes[k + 1])
+                ),
+                range(self.hilos),
+            )
+        )
+        xp = self.xp
+        return tuple(xp.concatenate([p[i] for p in partes]) for i in range(5))
+
+    def _bloque(self, posiciones, velocidad_suelo, activo, filas: slice):
+        vecindad = self.vecinos(posiciones, activo, filas)
+        return (
+            self.anticolision(posiciones, velocidad_suelo, vecindad),
+            self.separacion(vecindad),
+            self.cohesion(posiciones, vecindad),
+            vecindad.distancia_minima,
+            vecindad.n_vecinos,
+        )
 
     # -- suma --------------------------------------------------------------- #
 

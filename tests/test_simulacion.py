@@ -154,3 +154,80 @@ def test_una_formacion_mas_ancha_barre_en_menos_tiempo():
         ancha.resumen["eficacia"]["tiempo_mision_s"]
         < estrecha.resumen["eficacia"]["tiempo_mision_s"]
     )
+
+
+def test_el_reparto_entre_hilos_no_altera_el_resultado():
+    """Repartir el paso entre hilos debe ser transparente.
+
+    Cada dron se calcula con las mismas operaciones y en el mismo orden; los
+    bloques solo se concatenan. Si esto fallara, la reproducibilidad —sobre la
+    que descansa toda comparación de configuraciones— se vendría abajo.
+    """
+    uno = simular(config_pequena(simulacion=replace(
+        config_pequena().simulacion, hilos=1)))
+    varios = simular(config_pequena(simulacion=replace(
+        config_pequena().simulacion, hilos=4)))
+
+    assert uno.info["hilos"] == 1
+    assert varios.info["hilos"] == 4
+    assert np.array_equal(uno.registro.datos(), varios.registro.datos())
+    assert uno.resumen == varios.resumen
+
+
+def test_los_hilos_automaticos_se_ajustan_al_enjambre():
+    """Con enjambres pequeños no se reparte: costaría más de lo que ahorra."""
+    import os
+
+    from unai.calculo import seleccionar
+    from unai.comportamientos import Comportamientos
+    from unai.config import ConfigComportamiento, ConfigEnjambre
+
+    motor = seleccionar(False)
+    nucleos = os.cpu_count() or 1
+
+    def hilos(n):
+        comp = Comportamientos(
+            ConfigComportamiento(), ConfigEnjambre(n_drones=n), motor, 0
+        )
+        resultado = comp.hilos
+        comp.cerrar()
+        return resultado
+
+    assert hilos(20) == 1
+    assert hilos(100) == min(2, nucleos)
+    assert hilos(100_000) == nucleos
+
+    # Nunca más hilos que drones, ni aunque se pidan a mano.
+    comp = Comportamientos(ConfigComportamiento(), ConfigEnjambre(n_drones=3), motor, 64)
+    assert comp.hilos <= 3
+    comp.cerrar()
+
+
+def test_el_bloque_de_filas_da_lo_mismo_que_la_matriz_entera():
+    """Las fuerzas de pares calculadas por bloques son idénticas a las de golpe."""
+    from unai.calculo import seleccionar
+    from unai.comportamientos import Comportamientos
+    from unai.config import ConfigComportamiento, ConfigEnjambre
+
+    motor = seleccionar(False)
+    enjambre = ConfigEnjambre(n_drones=60)
+    comp = Comportamientos(ConfigComportamiento(), enjambre, motor, 1)
+    azar = np.random.default_rng(0)
+    p = azar.uniform(0, 120, (60, 3))
+    v = azar.uniform(-15, 15, (60, 3))
+
+    entera = comp.vecinos(p)
+    esperado = (
+        comp.anticolision(p, v, entera),
+        comp.separacion(entera),
+        comp.cohesion(p, entera),
+        entera.distancia_minima,
+        entera.n_vecinos,
+    )
+
+    trozos = [comp._bloque(p, v, None, slice(i, min(i + 17, 60))) for i in range(0, 60, 17)]
+    obtenido = tuple(np.concatenate([t[k] for t in trozos]) for k in range(5))
+
+    for referencia, calculado in zip(esperado, obtenido):
+        assert np.array_equal(referencia, calculado)
+    comp.cerrar()

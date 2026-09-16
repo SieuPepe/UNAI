@@ -240,6 +240,63 @@ son equivalentes pero no bit a bit, porque la GPU acumula las sumas en otro orde
 
 ---
 
+## 5.1 Multinúcleo: sí, pero por dos caminos distintos
+
+Los pasos de tiempo son secuenciales por naturaleza —el instante siguiente depende del anterior— así
+que el tiempo no se reparte. Hay dos sitios donde sí cabe el paralelismo, y conviene no confundirlos.
+
+### Dentro del paso: hilos sobre la matriz de pares
+
+El grueso del paso es la matriz de todos los pares de drones (era el 80 % del perfil). Se parte por
+filas y cada hilo calcula unos cuantos drones. Funciona con hilos y no hace falta llegar a procesos
+porque **NumPy suelta el bloqueo global del intérprete** mientras opera sobre matrices.
+
+Medido con `unai banco --hilos` sobre el paso completo, en una máquina de **4 núcleos**:
+
+| Drones | 1 hilo | 2 hilos | 4 hilos | 8 hilos | Mejor |
+|---:|---:|---:|---:|---:|---:|
+| 100 | 3,71 ms | **2,99 ms** | 4,77 ms | 9,05 ms | 1,24× |
+| 300 | 33,36 ms | **17,96 ms** | 19,54 ms | 20,22 ms | 1,86× |
+| 600 | 133,93 ms | 70,81 ms | 69,58 ms | **60,95 ms** | 2,20× |
+
+Y sobre el cálculo de pares aislado, sin la parte del paso que no se reparte, la ganancia llega a
+**4,49× con 4 hilos a 1.000 drones**: superlineal, porque partir la matriz en bloques de filas
+mejora además el aprovechamiento de la caché. Lo que limita la ganancia de extremo a extremo es lo
+que no se reparte —consulta de obstáculos, marcado de cobertura, integración—, que es la ley de
+Amdahl en estado puro.
+
+Dos cosas que conviene subrayar:
+
+- **A 100 drones con 4 hilos el paso tarda el doble** que con uno. Repartir tiene un coste fijo, y
+  con matrices pequeñas ese coste se come la ganancia. Por eso el número de hilos por omisión sale
+  del tamaño del enjambre y no solo de los núcleos disponibles.
+- **A 600 drones conviene usar más hilos que núcleos** (8 sobre 4). Con la memoria como cuello de
+  botella, tener hilos de sobra permite solapar esperas. Es contraintuitivo y es la razón de medir
+  en vez de suponer.
+
+El resultado es **idéntico bit a bit** con cualquier número de hilos, comprobado en la batería de
+pruebas: cada dron se calcula igual y en el mismo orden, y los bloques solo se concatenan.
+
+### Entre simulaciones: procesos
+
+Comparar configuraciones con rigor exige repetir la misma misión con veinte semillas (documento 03,
+§3.1), y esas veinte son independientes. Aquí sí hacen falta procesos —el bucle de simulación es
+código Python y el bloqueo global lo serializaría— y el resultado es casi perfecto:
+
+| Reparto | Tiempo | Ganancia |
+|---|---:|---:|
+| 8 simulaciones en serie | 10,1 s | — |
+| 8 simulaciones en 2 procesos | 5,3 s | 1,98× |
+| 8 simulaciones en 4 procesos | **2,7 s** | **3,95×** |
+
+Resultados idénticos en los tres casos. Con más núcleos escala igual, hasta agotar las semillas.
+
+**Cuál usar.** Para una sola misión larga, los hilos. Para comparar configuraciones, los procesos, y
+con mucha diferencia: 3,95× limpio frente a 1,24-2,20×. Si se usan procesos, cada uno se limita a un
+hilo para que no se peleen por los mismos núcleos.
+
+---
+
 ## 6. Correcciones menores
 
 - **El bosque de 10 km² son 0,5-1 millón de troncos, no 5-10 millones.** Diez km² son 1.000

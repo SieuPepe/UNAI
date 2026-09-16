@@ -49,14 +49,17 @@ python -m unai estimar --drones 100 --separacion 10 --entorno bosque
 python -m unai simular --config configs/referencia.json --abrir
 python -m unai simular --drones 200 --separacion 6 --formacion linea --km2 4 --viento 8 --gpu
 python -m unai lote --config configs/bosque.json --semillas 20
+python -m unai lote --config configs/bosque.json --semillas 20 --procesos 8
 python -m unai banco --drones-lista 50,100,500,2000
+python -m unai banco --hilos --drones-lista 100,500,2000
 ```
 
 - `estimar` muestra las magnitudes derivadas sin simular nada.
 - `simular` ejecuta una misión y escribe `visor.html`, `metricas.json`, `serie.csv` y `config.json`.
 - `lote` repite con varias semillas y resume mediana y cuartiles, que es como se compara con
   rigor: una sola ejecución de cada configuración no demuestra nada.
-- `banco` mide CPU frente a GPU y busca el punto de cruce en la máquina concreta.
+- `banco` mide CPU frente a GPU y busca el punto de cruce en la máquina concreta. Con `--hilos`,
+  mide en cambio cuántos hilos convienen para cada tamaño de enjambre.
 
 ### Escenarios incluidos
 
@@ -105,6 +108,14 @@ obtiene un enjambre más local: se obtiene una anticolisión que reacciona tarde
 **Una formación rígida no atraviesa un bosque.** Con 500 árboles por hectárea hay un tronco cada
 4,5 m y los drones van a 10 m. La separación máxima se implementa como fuerza blanda, no como
 atadura: el dron rompe formación, pasa y vuelve. Que se deshaga es un resultado, no un fallo.
+
+**El cálculo aprovecha varios núcleos, por dos caminos distintos.** Los pasos de tiempo son
+secuenciales y no se pueden repartir, pero sí el trabajo dentro de cada paso: la matriz de pares de
+drones se parte por filas entre hilos, con ganancias medidas de 1,24× a 100 drones y 2,20× a 600 en
+una máquina de 4 núcleos. Y sobre todo, las simulaciones de un lote son independientes: repartirlas
+entre procesos da **3,95× con 4 núcleos**, casi perfecto. El resultado es idéntico bit a bit en
+todos los casos. El número de hilos por omisión sale de los núcleos y del tamaño del enjambre;
+`unai banco --hilos` mide el óptimo real de tu máquina.
 
 **La GPU no acelera a esta escala.** Medido: 100 drones son matrices de 100 filas, y cada
 operación cuesta más en despacharse al chip que en resolverse. La casilla está y funciona, pero la
