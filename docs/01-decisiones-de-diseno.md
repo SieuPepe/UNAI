@@ -156,6 +156,49 @@ Cada entorno se define en un fichero de configuración legible, con semilla alea
 
 ---
 
+## 5.1 Interfaz de lanzamiento — CERRADO
+
+Además de la línea de órdenes, el software tiene una **ventana de lanzamiento** desde la que se
+introducen los parámetros a mano antes de simular. Se construye con Tkinter, que viene incluido
+en la instalación estándar de Python en Windows, así que no añade ninguna dependencia.
+
+Controles obligatorios:
+
+| Control | Tipo | Parámetro |
+|---|---|---|
+| **Número de drones** | campo numérico | `n_drones` |
+| **Distancia máxima entre drones** | campo numérico | `separacion_max_m` |
+| **Usar GPU** | **casilla de verificación** | `usar_gpu` |
+
+Y, por comodidad, también: entorno, forma de la formación, lado de la zona, duración, semilla y
+altura de vuelo (que por defecto se calcula sola a partir de la separación, §5.2 del documento 04).
+
+La ventana muestra en vivo las magnitudes derivadas —frente de barrido, altura sin solape, número
+de pasadas y tiempo estimado de misión— de modo que se vea el efecto de cada cambio **antes** de
+lanzar, que es donde está el valor: la diferencia entre una formación en línea y una en columna
+son minutos frente a horas, y conviene saberlo antes de esperar.
+
+La línea de órdenes se mantiene como interfaz principal para el uso por lotes: comparar
+configuraciones exige lanzar decenas de simulaciones sin abrir ninguna ventana (`docs/03`, §3.1).
+La ventana escribe exactamente la misma configuración que consume la línea de órdenes, así que un
+lanzamiento manual es reproducible después sin la ventana.
+
+### Dispositivo de cálculo — CERRADO
+
+El motor corre indistintamente en **CPU (NumPy)** o en **GPU de NVIDIA (CuPy)**, seleccionable con
+la casilla. Conviene decir sin rodeos lo que cabe esperar: **a 100 drones la GPU será más lenta que
+la CPU.** Cada operación sobre matrices cuesta del orden de 5-10 microsegundos en despacharse al
+chip, se opere sobre cien números o sobre diez millones, y un paso de simulación encadena decenas
+de operaciones sobre matrices de 100 filas. La GPU empieza a compensar a partir de varios miles de
+drones. Se implementa igualmente porque el enjambre es un parámetro libre y porque el punto de
+cruce se mide, no se supone: el proyecto incluye un banco de pruebas que lo determina en cada
+máquina.
+
+Si se marca la casilla y no hay GPU utilizable, se **avisa de forma visible** y se continúa en CPU.
+Un respaldo silencioso haría que una comparación de rendimiento mintiera sin que nadie se enterase.
+
+---
+
 ## 6. Principios de construcción — CERRADO
 
 1. **Reproducibilidad total.** Toda aleatoriedad (viento, colocación de obstáculos, ruido de

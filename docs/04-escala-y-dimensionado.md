@@ -23,7 +23,7 @@ arriba son los del caso de referencia; el software debe admitir cualquier otro s
 | Separación máxima entre drones | `d_max` | 10 m | 2 – 500 m |
 | Altura de vuelo | `h` | 5 m (ver §3) | 2 – 100 m |
 | Forma de la formación | — | línea en ala | línea, rejilla `f × c`, cuña |
-| Radio de comunicación | `R_com` | 30 m | 10 – 500 m |
+| Radio de comunicación | `R_com` | 150 m | 20 – 1.000 m |
 | Velocidad de crucero | `v` | 15 m/s | 3 – 25 m/s |
 
 ---
@@ -216,6 +216,29 @@ quién.
 El experimento se mantiene, reformulado: **¿cuánto deforma la formación el retardo de propagación,
 y qué radio hace falta para que la línea gire limpia?**
 
+### `R_com` tiene un mínimo que no es negociable
+
+Hallazgo aparecido al implementar y probar la anticolisión, no previsto en el diseño sobre el
+papel. Para que un dron pueda **ver venir** un cruce con el horizonte temporal que tiene
+configurado, el radio de comunicación debe cubrir al menos lo que los dos drones recorren en ese
+tiempo:
+
+```
+R_com  >=  velocidad de cierre máxima x horizonte
+        =  2 x v_max x horizonte
+        =  2 x 15 m/s x 4 s  =  120 metros
+```
+
+Con el valor de 30 m que figuraba en la tabla de arriba, dos drones que se acercan de frente a
+15 m/s cada uno **se ven un segundo antes de chocar**, aunque el horizonte configurado diga cuatro.
+No se obtiene un enjambre "más local": se obtiene una anticolisión que reacciona tarde, y sin
+avisar de que lo hace.
+
+**Decisión: `R_com` por defecto pasa a 150 m**, con margen sobre los 120 m mínimos. El programa
+comprueba esta relación al validar la configuración y avisa si no se cumple, indicando cuál es el
+horizonte efectivo real. Los valores pequeños de la tabla siguen siendo utilizables para estudiar
+la degradación, pero ahora se sabe lo que se está midiendo.
+
 ---
 
 ## 8. El paso de integración se queda corto
@@ -256,6 +279,14 @@ y no antes.
 | 20 min | 6.000 | 3,6 MB | 4,8 MB |
 | 30 min | 9.000 | 5,4 MB | 7,2 MB |
 
+**El bosque se almacena, no se genera al vuelo.** Un error aritmético de la versión anterior daba
+5-10 millones de troncos para 10 km²; la cifra correcta es **0,5-1 millón** (10 km² son 1.000
+hectáreas, a 500-1.000 árboles por hectárea). Un millón de troncos como `float32` ocupa 16 MB:
+perfectamente almacenable. Se indexan en una **rejilla uniforme** construida una sola vez, con
+tantas plazas por celda como exija la celda más poblada, de modo que la consulta "¿qué obstáculos
+tengo cerca?" sea exacta y vectorizada. Se descarta la generación procedural, que era complejidad
+innecesaria.
+
 **La rejilla de cobertura baja a 5 m de celda**, no 10: la huella a 5 m de altura mide 10 m, y
 medir con celdas del tamaño de la huella no detecta huecos. 5 m sobre 10 km² son 400.000 celdas,
 0,8 MB. Asumible.
@@ -275,7 +306,8 @@ medir con celdas del tamaño de la huella no detecta huecos. 5 m sobre 10 km² s
 | Voronoi + Lloyd entre drones individuales | **Sustituida** por Voronoi entre subenjambres (§6). |
 | Volar alto es rentable | **Invertida.** Volar alto multiplica la redundancia (§3). |
 | Sin rejilla espacial; matriz densa | **Se mantiene.** |
-| Bosque procedural; interior a escala propia | **Se mantiene.** |
+| Bosque procedural por ser inviable almacenarlo | **Corregida.** Eran 0,5-1 millón de troncos, no 5-10 millones: sí caben en memoria (§9). |
+| Interior a escala propia | **Se mantiene.** |
 
 ---
 
